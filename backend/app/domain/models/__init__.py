@@ -11,6 +11,7 @@ from .notification import (
     NotificationRule,
 )
 from .platform import AuthType, PlatformKey, PlatformProfile
+from .report import Report, ReportStatus, ReportType
 from .signal import RiskLevel, Signal, SignalStatus, SignalType
 from .task import CollectionTask, EntityType, ScenarioType, TaskMode, TaskRun, TaskStatus
 
@@ -41,6 +42,9 @@ __all__ = [
     "AuthType",
     "PlatformKey",
     "PlatformProfile",
+    "Report",
+    "ReportStatus",
+    "ReportType",
     "RiskLevel",
     "Signal",
     "SignalStatus",

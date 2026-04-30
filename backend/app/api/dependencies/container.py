@@ -10,6 +10,7 @@ from ...application.entity_service import EntityService
 from ...application.evidence_service import EvidenceService
 from ...application.log_service import LogService
 from ...application.notification_service import NotificationService
+from ...application.report_service import ReportService
 from ...application.signal_service import SignalService
 from ...application.task_service import CollectionTaskService
 from ...infrastructure.persistence.json_analysis_repository import JsonAnalysisRepository
@@ -18,6 +19,7 @@ from ...infrastructure.persistence.json_dataset_repository import JsonDatasetRep
 from ...infrastructure.persistence.json_entity_repository import JsonEntityRepository
 from ...infrastructure.persistence.json_evidence_repository import JsonEvidenceRepository
 from ...infrastructure.persistence.json_notification_repository import JsonNotificationRepository
+from ...infrastructure.persistence.json_report_repository import JsonReportRepository
 from ...infrastructure.persistence.json_signal_repository import JsonSignalRepository
 from ...infrastructure.persistence.json_task_repository import JsonCollectionTaskRepository
 
@@ -60,6 +62,9 @@ class AppContainer:
         self._notification_repository = JsonNotificationRepository(
             self.storage_dir / "notification_rules.json",
             self.storage_dir / "notification_deliveries.json",
+        )
+        self._report_repository = JsonReportRepository(
+            self.storage_dir / "reports.json"
         )
         self._dataset_service = DatasetService(
             self._dataset_repository,
@@ -108,6 +113,11 @@ class AppContainer:
             self._dataset_service,
         )
         self._log_service = LogService(self._task_service, self.storage_dir)
+        self._report_service = ReportService(
+            self._report_repository,
+            self._case_service,
+            self.storage_dir / "report_files",
+        )
 
     @property
     def task_service(self) -> CollectionTaskService:
@@ -144,6 +154,10 @@ class AppContainer:
     @property
     def log_service(self) -> LogService:
         return self._log_service
+
+    @property
+    def report_service(self) -> ReportService:
+        return self._report_service
 
     def _default_media_crawler_root(self) -> Path:
         if self.root_dir.name == "mediaspider-intel-platform" and self.root_dir.parent.name == "products":

@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from app.api.dependencies import container as current_container, set_container
+from app.api.dependencies.container import AppContainer
+from app.main import app
+
+
+def _create_report_case(client: TestClient, tmp_path: Path) -> str:
+    dataset_file_dir = tmp_path / "storage" / "dataset_files"
+    dataset_file_dir.mkdir(parents=True, exist_ok=True)
+    sample_path = dataset_file_dir / "report_source.jsonl"
+    sample_path.write_text(
+        json.dumps({"content_id": "note_report_001", "body": "微信 abc12345 引流"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    dataset_id = client.post(
+        "/api/datasets",
+        json={
+            "dataset_name": "Report Source Dataset",
+            "dataset_type": "raw",
+            "source_platform": "xhs",
+            "scenario_type": "lead_diversion",
+            "storage_uri": "report_source.jsonl",
+        },
+    ).json()["dataset"]["id"]
+    signal_id = client.post(
+        "/api/signals",
+        json={
+            "dataset_id": dataset_id,
+            "signal_type": "contact_point_hit",
+            "signal_source": "rule:contact_points",
+            "risk_level": "high",
+            "risk_score": 86,
+            "summary": "疑似联系方式或导流点：abc12345",
+            "status": "confirmed",
+            "payload_json": {
+                "source_ref": {
+                    "dataset_id": dataset_id,
+                    "row_index": 0,
+                    "source_entity_id": "note_report_001",
+                    "raw_ref": "https://example.test/note_report_001",
+                }
+            },
+        },
+    ).json()["signal"]["id"]
+    case_id = client.post(
+        "/api/cases",
+        json={
+            "case_name": "报告生成案件",
+            "case_type": "lead_diversion",
+            "priority": "high",
+            "summary": "围绕联系方式 abc12345 的研判报告。",
+            "owner": "analyst",
+        },
+    ).json()["case"]["id"]
+    for link_type, target_id in [("dataset", dataset_id), ("signal", signal_id)]:
+        response = client.post(
+            f"/api/cases/{case_id}/links",
+            json={"link_type": link_type, "target_id": target_id, "label": link_type},
+        )
+        assert response.status_code == 200
+    note_response = client.post(
+        f"/api/cases/{case_id}/notes",
+        json={"author": "analyst", "body": "已确认 source_ref 可以回溯到原始记录。"},
+    )
+    assert note_response.status_code == 200
+    packet_response = client.post(
+        "/api/evidence/packets",
+        json={"case_id": case_id, "packet_name": "报告证据包"},
+    )
+    assert packet_response.status_code == 200
+    return case_id
+
+
+def test_generate_report_from_case_and_download(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        case_id = _create_report_case(client, tmp_path)
+
+        generate_response = client.post(
+            "/api/reports",
+            json={
+                "case_id": case_id,
+                "report_name": "导流链路研判报告",
+                "report_type": "investigation_brief",
+            },
+        )
+        assert generate_response.status_code == 200
+        report = generate_response.json()["report"]
+        assert report["case_id"] == case_id
+        assert report["summary_json"]["signal_count"] == 1
+        assert report["summary_json"]["evidence_packet_count"] == 1
+        assert "Source Traceability" in report["content_markdown"]
+        assert "note_report_001" in report["content_markdown"]
+
+        list_response = client.get("/api/reports")
+        assert list_response.status_code == 200
+        assert list_response.json()["reports"][0]["id"] == report["id"]
+
+        detail_response = client.get(f"/api/reports/{report['id']}")
+        assert detail_response.status_code == 200
+        assert detail_response.json()["report"]["storage_uri"].endswith(".md")
+
+        download_response = client.get(f"/api/reports/{report['id']}/download")
+        assert download_response.status_code == 200
+        assert "导流链路研判报告" in download_response.text
+    finally:
+        set_container(original_container)
+
+
+def test_generate_report_missing_case_returns_404(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/reports",
+            json={"case_id": "case_missing", "report_name": "Missing Case Report"},
+        )
+        assert response.status_code == 404
+    finally:
+        set_container(original_container)

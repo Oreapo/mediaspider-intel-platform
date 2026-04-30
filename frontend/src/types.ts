@@ -191,6 +191,19 @@ export interface EvidencePacket {
   updated_at: string
 }
 
+export interface Report {
+  id: string
+  case_id: string
+  report_name: string
+  report_type: string
+  status: string
+  storage_uri: string
+  content_markdown: string
+  summary_json: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
 export interface NotificationRule {
   id: string
   rule_name: string

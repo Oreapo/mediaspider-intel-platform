@@ -12,6 +12,7 @@ from .api.routes import (
     logs_router,
     notifications_router,
     platforms_router,
+    reports_router,
     signals_router,
     tasks_router,
 )
@@ -46,6 +47,7 @@ app.include_router(cases_router, prefix="/api")
 app.include_router(evidence_router, prefix="/api")
 app.include_router(notifications_router, prefix="/api")
 app.include_router(logs_router, prefix="/api")
+app.include_router(reports_router, prefix="/api")
 
 
 @app.get("/health")

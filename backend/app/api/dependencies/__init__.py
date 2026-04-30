@@ -8,6 +8,7 @@ from ...application.entity_service import EntityService
 from ...application.evidence_service import EvidenceService
 from ...application.log_service import LogService
 from ...application.notification_service import NotificationService
+from ...application.report_service import ReportService
 from ...application.signal_service import SignalService
 from ...application.task_service import CollectionTaskService
 
@@ -56,6 +57,10 @@ def get_log_service() -> LogService:
     return container.log_service
 
 
+def get_report_service() -> ReportService:
+    return container.report_service
+
+
 __all__ = [
     "container",
     "set_container",
@@ -68,4 +73,5 @@ __all__ = [
     "get_evidence_service",
     "get_notification_service",
     "get_log_service",
+    "get_report_service",
 ]

@@ -181,6 +181,21 @@ class EvidencePacketTable(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
 
 
+class ReportTable(Base):
+    __tablename__ = "reports"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    report_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    report_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    storage_uri: Mapped[str] = mapped_column(String(255), default="")
+    content_markdown: Mapped[str] = mapped_column(Text, default="")
+    summary_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
+
+
 class NotificationRuleTable(Base):
     __tablename__ = "notification_rules"
 
