@@ -16,7 +16,13 @@ from app.api.dependencies.container import AppContainer
 from app.main import app
 
 
-def _create_case_with_signal(client: TestClient, tmp_path: Path) -> str:
+def _auth_headers(client: TestClient) -> dict[str, str]:
+    response = client.post("/api/auth/login", json={"username": "analyst", "password": "secret"})
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def _create_case_with_signal(client: TestClient, tmp_path: Path, headers: dict[str, str] | None = None) -> str:
     dataset_file_dir = tmp_path / "storage" / "dataset_files"
     dataset_file_dir.mkdir(parents=True, exist_ok=True)
     (dataset_file_dir / "evidence_source.jsonl").write_text(
@@ -32,6 +38,7 @@ def _create_case_with_signal(client: TestClient, tmp_path: Path) -> str:
             "scenario_type": "lead_diversion",
             "storage_uri": "evidence_source.jsonl",
         },
+        headers=headers,
     ).json()["dataset"]
     signal = client.post(
         "/api/signals",
@@ -52,6 +59,7 @@ def _create_case_with_signal(client: TestClient, tmp_path: Path) -> str:
                 },
             },
         },
+        headers=headers,
     ).json()["signal"]
     case = client.post(
         "/api/cases",
@@ -61,16 +69,19 @@ def _create_case_with_signal(client: TestClient, tmp_path: Path) -> str:
             "priority": "high",
             "summary": "用于证据包测试的案件",
         },
+        headers=headers,
     ).json()["case"]
     for link_type, target_id in [("dataset", dataset["id"]), ("signal", signal["id"])]:
         response = client.post(
             f"/api/cases/{case['id']}/links",
             json={"link_type": link_type, "target_id": target_id},
+            headers=headers,
         )
         assert response.status_code == 200
     note_response = client.post(
         f"/api/cases/{case['id']}/notes",
         json={"author": "analyst", "body": "证据链条初步完整。"},
+        headers=headers,
     )
     assert note_response.status_code == 200
     return case["id"]
@@ -127,6 +138,33 @@ def test_evidence_packet_download_returns_artifact(tmp_path):
         payload = response.json()
         assert payload["packet_id"] == packet["id"]
         assert payload["case"]["id"] == case_id
+    finally:
+        set_container(original_container)
+
+
+def test_evidence_packet_download_accepts_query_access_token_when_auth_required(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDIASPIDER_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_USERS", "analyst:secret:analyst:Risk Analyst")
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        headers = _auth_headers(client)
+        case_id = _create_case_with_signal(client, tmp_path, headers=headers)
+        packet = client.post(
+            "/api/evidence/packets",
+            json={"case_id": case_id, "packet_name": "query_token_packet"},
+            headers=headers,
+        ).json()["packet"]
+        token = headers["Authorization"].split(" ", 1)[1]
+
+        response = client.get(f"/api/evidence/{packet['id']}/download", params={"access_token": token})
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.json()["packet_id"] == packet["id"]
     finally:
         set_container(original_container)
 

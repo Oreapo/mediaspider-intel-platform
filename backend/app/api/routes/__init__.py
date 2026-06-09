@@ -1,5 +1,7 @@
 from .analysis import router as analysis_router
+from .auth import router as auth_router
 from .cases import router as cases_router
+from .dashboard import router as dashboard_router
 from .datasets import router as datasets_router
 from .entities import router as entities_router
 from .evidence import router as evidence_router
@@ -12,7 +14,9 @@ from .tasks import router as tasks_router
 
 __all__ = [
     "analysis_router",
+    "auth_router",
     "cases_router",
+    "dashboard_router",
     "datasets_router",
     "entities_router",
     "evidence_router",

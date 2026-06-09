@@ -1,14 +1,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { getRunLog, listRunLogs } from '../api/logs'
-import type { RunLogDetail, RunLogEntry } from '../types'
+import { getRunLog, listAuditEvents, listRunLogs } from '../api/logs'
+import AppAlert from '../components/ui/AppAlert.vue'
+import BaseSection from '../components/ui/BaseSection.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import LoadingState from '../components/ui/LoadingState.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useI18n } from '../composables/useI18n'
+import type { AuditEvent, RunLogDetail, RunLogEntry } from '../types'
 
+const { t } = useI18n()
 const entries = ref<RunLogEntry[]>([])
+const auditEvents = ref<AuditEvent[]>([])
 const selected = ref<RunLogDetail | null>(null)
+const activeTab = ref<'runs' | 'audit'>('runs')
 const isLoading = ref(false)
+const isLoadingAudit = ref(false)
 const isLoadingLog = ref(false)
 const error = ref('')
+const auditError = ref('')
 const logError = ref('')
+const auditFilters = ref({
+  q: '',
+  targetType: '',
+  targetId: '',
+  actorUsername: '',
+  action: '',
+  createdFrom: '',
+  createdTo: '',
+})
 
 const successfulRuns = computed(() => entries.value.filter((item) => item.run.status === 'succeeded').length)
 const failedRuns = computed(() => entries.value.filter((item) => item.run.status === 'failed').length)
@@ -33,7 +53,7 @@ async function selectRun(entry: RunLogEntry) {
   selected.value = null
   logError.value = ''
   if (!entry.has_log) {
-    logError.value = 'This run has no readable log.'
+    logError.value = t('logs.noReadableLog')
     return
   }
   isLoadingLog.value = true
@@ -52,51 +72,101 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-onMounted(fetchEntries)
+async function fetchAuditEvents() {
+  isLoadingAudit.value = true
+  auditError.value = ''
+  try {
+    auditEvents.value = await listAuditEvents(auditFilters.value)
+  } catch (err) {
+    auditError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    isLoadingAudit.value = false
+  }
+}
+
+async function clearAuditFilters() {
+  auditFilters.value = {
+    q: '',
+    targetType: '',
+    targetId: '',
+    actorUsername: '',
+    action: '',
+    createdFrom: '',
+    createdTo: '',
+  }
+  await fetchAuditEvents()
+}
+
+function runTone(status: string) {
+  if (status === 'succeeded') return 'success'
+  if (status === 'running') return 'info'
+  if (status === 'failed') return 'danger'
+  return 'neutral'
+}
+
+function formatDate(value: string | null) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+}
+
+function actionLabel(action: string) {
+  const key = `auditAction.${action}`
+  const translated = t(key)
+  return translated === key ? action : translated
+}
+
+function labelValue(value: string) {
+  const key = `enum.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
+}
+
+onMounted(() => {
+  fetchEntries()
+  fetchAuditEvents()
+})
 </script>
 
 <template>
   <section class="page-grid">
-    <section class="surface section-card">
-      <div class="section-head">
-        <div>
-          <h2>Run Logs</h2>
-          <p>任务运行日志、退出状态和数据集物化结果集中在这里审计。</p>
-        </div>
-        <button class="secondary-button" type="button" @click="fetchEntries">Refresh</button>
-      </div>
+    <BaseSection :title="t('logs.title')" :description="t('logs.description')">
+      <template #actions>
+        <button class="secondary-button" type="button" @click="activeTab === 'runs' ? fetchEntries() : fetchAuditEvents()">{{ t('logs.refresh') }}</button>
+      </template>
 
       <div class="stats-grid">
         <div class="stat-item">
-          <span>Total Runs</span>
+          <span>{{ t('logs.totalRuns') }}</span>
           <strong>{{ entries.length }}</strong>
         </div>
         <div class="stat-item">
-          <span>Succeeded</span>
+          <span>{{ t('logs.success') }}</span>
           <strong>{{ successfulRuns }}</strong>
         </div>
         <div class="stat-item">
-          <span>Failed</span>
+          <span>{{ t('logs.failed') }}</span>
           <strong>{{ failedRuns }}</strong>
         </div>
         <div class="stat-item">
-          <span>Logs</span>
+          <span>{{ t('logs.logs') }}</span>
           <strong>{{ runsWithLogs }}</strong>
         </div>
-      </div>
-    </section>
-
-    <section class="content-grid">
-      <section class="surface section-card">
-        <div class="section-head compact">
-          <div>
-            <h2>Run History</h2>
-            <p>最近的采集运行记录。</p>
-          </div>
+        <div class="stat-item">
+          <span>{{ t('logs.auditEvents') }}</span>
+          <strong>{{ auditEvents.length }}</strong>
         </div>
+      </div>
 
-        <div v-if="isLoading" class="muted">Loading logs...</div>
-        <div v-else-if="error" class="error-text">{{ error }}</div>
+      <div class="tab-strip" role="tablist" :aria-label="t('logs.tabAria')">
+        <button :class="{ active: activeTab === 'runs' }" type="button" @click="activeTab = 'runs'">{{ t('logs.runTab') }}</button>
+        <button :class="{ active: activeTab === 'audit' }" type="button" @click="activeTab = 'audit'">{{ t('logs.auditTab') }}</button>
+      </div>
+    </BaseSection>
+
+    <section v-if="activeTab === 'runs'" class="content-grid">
+      <BaseSection :title="t('logs.runHistoryTitle')" :description="t('logs.runHistoryDescription')">
+        <LoadingState v-if="isLoading" :title="t('logs.loadingLogs')" />
+        <AppAlert v-else-if="error" tone="error" :title="t('common.loadFailed')" :message="error" />
         <div v-else class="run-list">
           <button
             v-for="entry in entries"
@@ -105,36 +175,64 @@ onMounted(fetchEntries)
             type="button"
             @click="selectRun(entry)"
           >
-            <span class="status-badge">{{ entry.run.status }}</span>
+            <StatusBadge :label="labelValue(entry.run.status)" :tone="runTone(entry.run.status)" />
             <strong>{{ entry.run.task_id }}</strong>
-            <span>{{ entry.run.started_at || '-' }}</span>
-            <span>{{ entry.has_log ? formatBytes(entry.log_size) : 'no log' }}</span>
+            <span>{{ formatDate(entry.run.started_at) }}</span>
+            <span>{{ entry.has_log ? formatBytes(entry.log_size) : t('logs.noLog') }}</span>
           </button>
-          <div v-if="!entries.length" class="muted">No task runs yet.</div>
+          <EmptyState v-if="!entries.length" :title="t('logs.noRunsTitle')" :description="t('logs.noRunsDescription')" />
         </div>
-      </section>
+      </BaseSection>
 
-      <section class="surface section-card log-card">
-        <div class="section-head compact">
-          <div>
-            <h2>Log Output</h2>
-            <p v-if="selected">{{ selected.run.id }} · {{ selected.line_count }} lines</p>
-            <p v-else>选择一条运行记录查看日志。</p>
-          </div>
-        </div>
-
-        <div v-if="isLoadingLog" class="muted">Loading log...</div>
-        <div v-else-if="logError" class="error-text">{{ logError }}</div>
+      <BaseSection
+        class="log-card"
+        :title="t('logs.outputTitle')"
+        :description="selected ? `${selected.run.id} · ${selected.line_count} lines` : t('logs.outputDescription')"
+      >
+        <LoadingState v-if="isLoadingLog" :title="t('logs.loadingLogs')" />
+        <AppAlert v-else-if="logError" tone="warning" :title="t('logs.unreadableTitle')" :message="logError" />
         <pre v-else-if="selected" class="log-output">{{ selected.content }}</pre>
-        <div v-else class="muted">No log selected.</div>
-      </section>
+        <EmptyState v-else :title="t('logs.noSelectionTitle')" :description="t('logs.noSelectionDescription')" />
+      </BaseSection>
     </section>
+
+    <BaseSection v-else :title="t('logs.auditTitle')" :description="t('logs.auditDescription')">
+      <form class="audit-filter" @submit.prevent="fetchAuditEvents">
+        <input v-model="auditFilters.q" :placeholder="t('logs.auditSearchPlaceholder')" />
+        <input v-model="auditFilters.targetType" :placeholder="t('logs.targetTypePlaceholder')" />
+        <input v-model="auditFilters.targetId" :placeholder="t('logs.targetIdPlaceholder')" />
+        <input v-model="auditFilters.actorUsername" :placeholder="t('logs.actorPlaceholder')" />
+        <input v-model="auditFilters.action" :placeholder="t('logs.actionPlaceholder')" />
+        <input v-model="auditFilters.createdFrom" type="datetime-local" />
+        <input v-model="auditFilters.createdTo" type="datetime-local" />
+        <button class="secondary-button" type="submit">{{ t('logs.filter') }}</button>
+        <button class="secondary-button" type="button" @click="clearAuditFilters">{{ t('tasks.clear') }}</button>
+      </form>
+      <LoadingState v-if="isLoadingAudit" :title="t('logs.loadingAudit')" />
+      <AppAlert v-else-if="auditError" tone="error" :title="t('common.loadFailed')" :message="auditError" />
+      <div v-else class="audit-list">
+        <article v-for="event in auditEvents" :key="event.id" class="audit-item">
+          <div>
+            <StatusBadge :label="actionLabel(event.action)" tone="info" />
+            <h3>{{ event.summary }}</h3>
+            <p>{{ event.target_type }} / {{ event.target_id }}</p>
+          </div>
+          <div class="audit-meta">
+            <strong>{{ event.actor_username }}</strong>
+            <span>{{ event.actor_role }}</span>
+            <time>{{ formatDate(event.created_at) }}</time>
+          </div>
+        </article>
+        <EmptyState v-if="!auditEvents.length" :title="t('logs.noAuditTitle')" :description="t('logs.noAuditDescription')" />
+      </div>
+    </BaseSection>
   </section>
 </template>
 
 <style scoped>
 .page-grid,
-.run-list {
+.run-list,
+.audit-list {
   display: grid;
   gap: 16px;
 }
@@ -169,7 +267,7 @@ onMounted(fetchEntries)
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -186,10 +284,54 @@ onMounted(fetchEntries)
   font-size: 24px;
 }
 
+.tab-strip {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 4px;
+  margin-top: 16px;
+  padding: 4px;
+  border: 1px solid rgba(203, 213, 225, 0.86);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.tab-strip button {
+  border: none;
+  border-radius: 9px;
+  padding: 9px 12px;
+  background: transparent;
+  color: #475569;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tab-strip button.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.4fr);
   gap: 16px;
+}
+
+.audit-filter {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(120px, 1fr)) minmax(160px, 1fr) minmax(160px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.audit-filter input {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  background: rgba(255, 255, 255, 0.94);
 }
 
 .run-item {
@@ -206,6 +348,35 @@ onMounted(fetchEntries)
 
 .run-item strong {
   overflow-wrap: anywhere;
+}
+
+.audit-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.82);
+}
+
+.audit-item h3 {
+  margin: 10px 0 6px;
+  font-size: 16px;
+}
+
+.audit-item p,
+.audit-meta span,
+.audit-meta time {
+  margin: 0;
+  color: #64748b;
+}
+
+.audit-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+  text-align: right;
 }
 
 .status-badge {
@@ -254,12 +425,22 @@ onMounted(fetchEntries)
 
 @media (max-width: 960px) {
   .stats-grid,
-  .content-grid {
+  .content-grid,
+  .audit-filter {
     grid-template-columns: 1fr;
   }
 
   .section-head {
     display: grid;
+  }
+
+  .audit-item {
+    display: grid;
+  }
+
+  .audit-meta {
+    min-width: 0;
+    text-align: left;
   }
 }
 </style>

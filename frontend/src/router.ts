@@ -1,7 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from './layouts/AppShell.vue'
+import { useAuth } from './composables/useAuth'
+import { getLocalizedRouteTitle } from './composables/useI18n'
+import { hasRole, type AppRole } from './lib/permissions'
 
 const routes = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('./views/LoginView.vue'),
+    meta: { titleKey: 'route.login', public: true },
+  },
   {
     path: '/',
     component: AppShell,
@@ -11,67 +20,91 @@ const routes = [
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('./views/DashboardView.vue'),
-        meta: { title: 'Dashboard' },
+        meta: { titleKey: 'route.dashboard' },
       },
       {
         path: 'tasks',
         name: 'tasks',
         component: () => import('./views/TasksView.vue'),
-        meta: { title: 'Tasks' },
+        meta: { titleKey: 'route.tasks', roles: ['admin', 'operator', 'analyst'] },
+      },
+      {
+        path: 'tasks/:taskId',
+        name: 'task-detail',
+        component: () => import('./views/TaskDetailView.vue'),
+        meta: { titleKey: 'route.taskDetail', roles: ['admin', 'operator', 'analyst'] },
       },
       {
         path: 'datasets',
         name: 'datasets',
         component: () => import('./views/DatasetsView.vue'),
-        meta: { title: 'Datasets' },
+        meta: { titleKey: 'route.datasets' },
+      },
+      {
+        path: 'datasets/:datasetId',
+        name: 'dataset-detail',
+        component: () => import('./views/DatasetDetailView.vue'),
+        meta: { titleKey: 'route.datasetDetail' },
       },
       {
         path: 'analysis',
         name: 'analysis',
         component: () => import('./views/AnalysisView.vue'),
-        meta: { title: 'Analysis' },
+        meta: { titleKey: 'route.analysis' },
       },
       {
         path: 'signals',
         name: 'signals',
         component: () => import('./views/SignalsView.vue'),
-        meta: { title: 'Signals' },
+        meta: { titleKey: 'route.signals' },
+      },
+      {
+        path: 'signals/:signalId',
+        name: 'signal-detail',
+        component: () => import('./views/SignalDetailView.vue'),
+        meta: { titleKey: 'route.signalDetail' },
       },
       {
         path: 'entities',
         name: 'entities',
         component: () => import('./views/EntitiesView.vue'),
-        meta: { title: 'Entities' },
+        meta: { titleKey: 'route.entities' },
       },
       {
         path: 'cases',
         name: 'cases',
         component: () => import('./views/CasesView.vue'),
-        meta: { title: 'Cases' },
+        meta: { titleKey: 'route.cases' },
       },
       {
         path: 'evidence',
         name: 'evidence',
         component: () => import('./views/EvidenceView.vue'),
-        meta: { title: 'Evidence' },
+        meta: { titleKey: 'route.evidence' },
       },
       {
         path: 'reports',
         name: 'reports',
         component: () => import('./views/ReportsView.vue'),
-        meta: { title: 'Reports' },
+        meta: { titleKey: 'route.reports' },
       },
       {
         path: 'logs',
         name: 'logs',
         component: () => import('./views/LogsView.vue'),
-        meta: { title: 'Logs' },
+        meta: { titleKey: 'route.logs', roles: ['admin', 'operator', 'analyst'] },
       },
       {
         path: 'settings',
         name: 'settings',
         component: () => import('./views/SettingsView.vue'),
-        meta: { title: 'Settings' },
+        meta: { titleKey: 'route.settings', roles: ['admin', 'operator'] },
+      },
+      {
+        path: 'help',
+        name: 'help',
+        component: () => import('./views/HelpView.vue'),
+        meta: { titleKey: 'route.help' },
       },
     ],
   },
@@ -82,9 +115,31 @@ const router = createRouter({
   routes,
 })
 
+router.beforeEach(async (to) => {
+  const auth = useAuth()
+  if (!auth.isReady.value) await auth.initializeAuth()
+
+  if (!to.meta.public && !auth.user.value) {
+    return {
+      name: 'login',
+      query: { redirect: to.fullPath },
+    }
+  }
+
+  const roles = to.meta.roles as AppRole[] | undefined
+  if (roles && !hasRole(auth.user.value, roles)) {
+    return { name: 'dashboard' }
+  }
+
+  if (to.name === 'login' && auth.user.value) {
+    return { name: 'dashboard' }
+  }
+
+  return true
+})
+
 router.afterEach((to) => {
-  const appName = 'MediaSpider Intelligence Platform'
-  document.title = to.meta.title ? `${String(to.meta.title)} - ${appName}` : appName
+  document.title = getLocalizedRouteTitle(to.meta.titleKey as string | undefined)
 })
 
 export default router

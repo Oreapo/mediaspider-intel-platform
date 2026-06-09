@@ -37,3 +37,7 @@ class NotificationRuleUpdateRequest(BaseModel):
 
 class NotificationDigestRunRequest(BaseModel):
     now: str | None = None
+
+
+class NotificationInboxUpdateRequest(BaseModel):
+    read: bool = True

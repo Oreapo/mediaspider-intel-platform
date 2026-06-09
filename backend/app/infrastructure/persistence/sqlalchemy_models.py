@@ -226,5 +226,35 @@ class NotificationDeliveryTable(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
     error_message: Mapped[str] = mapped_column(Text, default="")
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
+
+
+class PlatformProfileTable(Base):
+    __tablename__ = "platform_profiles"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    profile_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    auth_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    credentials_ref: Mapped[str] = mapped_column(Text, default="")
+    settings_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
+
+
+class AuditEventTable(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    action: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    actor_username: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    target_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)

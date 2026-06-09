@@ -21,8 +21,63 @@ class DatasetService:
         self.storage_root = storage_root
         self.storage_root.mkdir(parents=True, exist_ok=True)
 
-    def list_datasets(self) -> list[Dataset]:
-        return self.repository.list_datasets()
+    def list_datasets(
+        self,
+        *,
+        source_platform: PlatformKey | None = None,
+        dataset_type: DatasetType | None = None,
+        scenario_type: ScenarioType | None = None,
+        tag: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Dataset]:
+        datasets, _ = self.list_datasets_page(
+            source_platform=source_platform,
+            dataset_type=dataset_type,
+            scenario_type=scenario_type,
+            tag=tag,
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
+        return datasets
+
+    def list_datasets_page(
+        self,
+        *,
+        source_platform: PlatformKey | None = None,
+        dataset_type: DatasetType | None = None,
+        scenario_type: ScenarioType | None = None,
+        tag: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[Dataset], int]:
+        datasets = self.repository.list_datasets()
+        if source_platform:
+            datasets = [dataset for dataset in datasets if dataset.source_platform == source_platform]
+        if dataset_type:
+            datasets = [dataset for dataset in datasets if dataset.dataset_type == dataset_type]
+        if scenario_type:
+            datasets = [dataset for dataset in datasets if dataset.scenario_type == scenario_type]
+        if tag:
+            tag_needle = tag.strip().lower()
+            datasets = [
+                dataset
+                for dataset in datasets
+                if any(tag_needle in item.lower() for item in dataset.tags)
+            ]
+        if query:
+            needle = query.strip().lower()
+            if needle:
+                datasets = [dataset for dataset in datasets if self._matches_query(dataset, needle)]
+        total = len(datasets)
+        if offset > 0:
+            datasets = datasets[offset:]
+        if limit is not None:
+            datasets = datasets[:limit]
+        return datasets, total
 
     def get_dataset(self, dataset_id: str) -> Dataset | None:
         return self.repository.get_dataset(dataset_id)
@@ -121,12 +176,14 @@ class DatasetService:
             return 0
         suffix = file_path.suffix.lower()
         if suffix == ".json":
-            data = json.loads(file_path.read_text(encoding="utf-8"))
+            with file_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
             if isinstance(data, list):
                 return len(data)
             return 1
         if suffix == ".jsonl":
-            return sum(1 for line in file_path.read_text(encoding="utf-8").splitlines() if line.strip())
+            with file_path.open("r", encoding="utf-8") as handle:
+                return sum(1 for line in handle if line.strip())
         if suffix == ".csv":
             with file_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 return max(sum(1 for _ in handle) - 1, 0)
@@ -135,15 +192,16 @@ class DatasetService:
     def _load_rows(self, file_path: Path, limit: int) -> list[dict[str, Any]]:
         suffix = file_path.suffix.lower()
         if suffix == ".json":
-            data = json.loads(file_path.read_text(encoding="utf-8"))
+            with file_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
             if isinstance(data, list):
                 return data[:limit]
             return [data]
         if suffix == ".jsonl":
             rows: list[dict[str, Any]] = []
             with file_path.open("r", encoding="utf-8") as handle:
-                for index, line in enumerate(handle):
-                    if index >= limit:
+                for line in handle:
+                    if len(rows) >= limit:
                         break
                     text = line.strip()
                     if text:
@@ -185,3 +243,18 @@ class DatasetService:
         if isinstance(value, (dict, list)):
             return json.dumps(value, ensure_ascii=False)
         return str(value)
+
+    def _matches_query(self, dataset: Dataset, needle: str) -> bool:
+        values = [
+            dataset.id,
+            dataset.dataset_name,
+            dataset.dataset_type.value,
+            dataset.source_platform.value,
+            dataset.scenario_type.value if dataset.scenario_type else "",
+            dataset.storage_uri,
+            dataset.schema_version,
+            dataset.source_task_id or "",
+            dataset.source_run_id or "",
+            *dataset.tags,
+        ]
+        return any(needle in str(value).lower() for value in values)

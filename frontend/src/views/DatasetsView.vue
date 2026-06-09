@@ -1,17 +1,31 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { createDataset, deleteDataset, previewDataset } from '../api/datasets'
+import AppAlert from '../components/ui/AppAlert.vue'
+import BaseSection from '../components/ui/BaseSection.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FieldError from '../components/ui/FieldError.vue'
+import LoadingState from '../components/ui/LoadingState.vue'
+import PaginationBar from '../components/ui/PaginationBar.vue'
+import PermissionGate from '../components/ui/PermissionGate.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useDatasets } from '../composables/useDatasets'
+import { useI18n } from '../composables/useI18n'
 import { usePlatformModels } from '../composables/usePlatformModels'
+import { requestConfirm } from '../lib/confirm'
+import { lastPageOffset } from '../lib/pagination'
+import { required, type ValidationErrors } from '../lib/validation'
 import type { DatasetPreview } from '../types'
 
 const {
   items: datasetItems,
+  total: datasetTotal,
   isLoading: datasetsLoading,
   error: datasetsError,
   fetchItems: fetchDatasets,
 } = useDatasets()
 const { items: platformItems } = usePlatformModels()
+const { t } = useI18n()
 
 const form = ref({
   dataset_name: '',
@@ -21,24 +35,36 @@ const form = ref({
   storage_uri: '',
   tags: '',
 })
+const filters = ref({
+  q: '',
+  source_platform: '',
+  dataset_type: '',
+  scenario_type: '',
+  tag: '',
+  limit: 100,
+  offset: 0,
+})
 const preview = ref<DatasetPreview | null>(null)
 const selectedDatasetId = ref('')
 const creating = ref(false)
 const message = ref('')
 const error = ref('')
+const formErrors = ref<ValidationErrors>({})
 
-const scenarioOptions = [
-  { value: 'lead_diversion', label: '引流导流' },
-  { value: 'gray_recruitment', label: '灰产招募' },
-  { value: 'fraud_promotion', label: '欺诈推广' },
-  { value: 'seller_risk', label: '卖家风险' },
-  { value: 'product_risk', label: '商品风险' },
-  { value: 'topic_watch', label: '主题监测' },
-]
+const scenarioOptions = computed(() => [
+  { value: 'lead_diversion', label: t('scenario.lead_diversion') },
+  { value: 'gray_recruitment', label: t('scenario.gray_recruitment') },
+  { value: 'fraud_promotion', label: t('scenario.fraud_promotion') },
+  { value: 'seller_risk', label: t('scenario.seller_risk') },
+  { value: 'product_risk', label: t('scenario.product_risk') },
+  { value: 'topic_watch', label: t('scenario.topic_watch') },
+])
 
 const selectedDataset = computed(() =>
   datasetItems.value.find((item) => item.id === selectedDatasetId.value),
 )
+
+const datasetTypes = computed(() => Array.from(new Set(datasetItems.value.map((item) => item.dataset_type))).sort())
 
 function parseTags(text: string) {
   return text
@@ -47,10 +73,24 @@ function parseTags(text: string) {
     .filter(Boolean)
 }
 
+function validateDatasetForm() {
+  const errors: ValidationErrors = {}
+  const nameError = required(form.value.dataset_name, t('datasets.name'))
+
+  if (nameError) errors.dataset_name = nameError
+  formErrors.value = errors
+  return Object.keys(errors).length === 0
+}
+
 async function submitDataset() {
-  creating.value = true
   message.value = ''
   error.value = ''
+  if (!validateDatasetForm()) {
+    error.value = t('datasets.fixFormErrors')
+    return
+  }
+
+  creating.value = true
   try {
     await createDataset({
       dataset_name: form.value.dataset_name,
@@ -60,16 +100,60 @@ async function submitDataset() {
       storage_uri: form.value.storage_uri,
       tags: parseTags(form.value.tags),
     })
-    message.value = 'Dataset created.'
+    message.value = t('datasets.createdMessage')
     form.value.dataset_name = ''
     form.value.storage_uri = ''
     form.value.tags = ''
-    await fetchDatasets()
+    await fetchDatasetPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     creating.value = false
   }
+}
+
+async function applyFilters() {
+  selectedDatasetId.value = ''
+  preview.value = null
+  filters.value.offset = 0
+  await fetchDatasetPage()
+}
+
+async function fetchDatasetPage() {
+  await fetchDatasets({
+    q: filters.value.q,
+    source_platform: filters.value.source_platform,
+    dataset_type: filters.value.dataset_type,
+    scenario_type: filters.value.scenario_type,
+    tag: filters.value.tag,
+    limit: filters.value.limit,
+    offset: filters.value.offset,
+  })
+  const normalizedOffset = lastPageOffset(datasetTotal.value, filters.value.limit)
+  if (filters.value.offset > normalizedOffset) {
+    filters.value.offset = normalizedOffset
+    if (datasetTotal.value > 0) await fetchDatasetPage()
+  }
+}
+
+async function changeDatasetPage(offset: number) {
+  selectedDatasetId.value = ''
+  preview.value = null
+  filters.value.offset = offset
+  await fetchDatasetPage()
+}
+
+async function clearFilters() {
+  filters.value = {
+    q: '',
+    source_platform: '',
+    dataset_type: '',
+    scenario_type: '',
+    tag: '',
+    limit: 100,
+    offset: 0,
+  }
+  await applyFilters()
 }
 
 async function loadPreview(datasetId: string) {
@@ -85,41 +169,58 @@ async function loadPreview(datasetId: string) {
 }
 
 async function removeDataset(datasetId: string) {
+  const confirmed = await requestConfirm({
+    title: t('datasets.deleteTitle'),
+    message: t('datasets.deleteMessage'),
+    confirmLabel: t('datasets.deleteConfirm'),
+  })
+  if (!confirmed) return
+
   message.value = ''
   error.value = ''
   try {
     await deleteDataset(datasetId)
-    message.value = 'Dataset deleted.'
+    message.value = t('datasets.deletedMessage')
     if (selectedDatasetId.value === datasetId) {
       selectedDatasetId.value = ''
       preview.value = null
     }
-    await fetchDatasets()
+    await fetchDatasetPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
+}
+
+function scenarioLabel(value?: string | null) {
+  if (!value) return '-'
+  const key = `scenario.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
+}
+
+function datasetTypeLabel(value: string) {
+  const key = `datasetType.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
 }
 </script>
 
 <template>
   <section class="page-grid">
-    <section class="surface section-card">
-      <div class="section-head">
-        <div>
-          <h2>Create Dataset</h2>
-          <p>数据集负责把抓取结果沉淀成后续可预览、可分析的标准输入。</p>
-        </div>
-      </div>
-
+    <div class="dataset-workspace">
+      <aside class="dataset-side-panel">
+    <BaseSection compact :title="t('datasets.createTitle')" :description="t('datasets.createDescription')">
+      <PermissionGate area="workflow">
       <form class="dataset-form" @submit.prevent="submitDataset">
         <div class="grid-two">
           <label class="field">
-            <span>Dataset Name</span>
-            <input v-model="form.dataset_name" required placeholder="例：小红书情报采集 2026-04-27" />
+            <span>{{ t('datasets.name') }}</span>
+            <input v-model="form.dataset_name" required :placeholder="t('datasets.namePlaceholder')" />
+            <FieldError :message="formErrors.dataset_name" />
           </label>
 
           <label class="field">
-            <span>Source Platform</span>
+            <span>{{ t('datasets.sourcePlatform') }}</span>
             <select v-model="form.source_platform">
               <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
                 {{ item.label }}
@@ -130,16 +231,16 @@ async function removeDataset(datasetId: string) {
 
         <div class="grid-two">
           <label class="field">
-            <span>Dataset Type</span>
+            <span>{{ t('datasets.type') }}</span>
             <select v-model="form.dataset_type">
-              <option value="raw">raw</option>
-              <option value="normalized">normalized</option>
-              <option value="analysis_ready">analysis_ready</option>
+              <option value="raw">{{ t('datasetType.raw') }}</option>
+              <option value="normalized">{{ t('datasetType.normalized') }}</option>
+              <option value="analysis_ready">{{ t('datasetType.analysis_ready') }}</option>
             </select>
           </label>
 
           <label class="field">
-            <span>Risk Scenario</span>
+            <span>{{ t('tasks.scenario') }}</span>
             <select v-model="form.scenario_type">
               <option v-for="item in scenarioOptions" :key="item.value" :value="item.value">
                 {{ item.label }}
@@ -150,70 +251,128 @@ async function removeDataset(datasetId: string) {
 
         <div class="grid-two">
           <label class="field">
-            <span>Tags</span>
+            <span>{{ t('datasets.tags') }}</span>
             <input v-model="form.tags" placeholder="brand, campaign, launch" />
           </label>
           <div class="field field-empty" aria-hidden="true" />
         </div>
 
         <label class="field">
-          <span>Storage URI</span>
+          <span>{{ t('datasets.storageUri') }}</span>
           <input
             v-model="form.storage_uri"
-            placeholder="例：xhs/xhs_brand_20260427.jsonl，路径相对 backend/storage/dataset_files"
+            :placeholder="t('datasets.storagePlaceholder')"
           />
         </label>
 
         <div class="actions">
           <button class="primary-button" :disabled="creating" type="submit">
-            {{ creating ? 'Creating...' : 'Create Dataset' }}
+            {{ creating ? t('datasets.creating') : t('datasets.create') }}
           </button>
-          <span v-if="message" class="success-text">{{ message }}</span>
-          <span v-if="error" class="error-text">{{ error }}</span>
         </div>
+        <AppAlert v-if="message" tone="success" :title="t('tasks.successTitle')" :message="message" />
+        <AppAlert v-if="error" tone="error" :title="t('tasks.actionFailedTitle')" :message="error" />
       </form>
-    </section>
+      </PermissionGate>
+    </BaseSection>
+      </aside>
 
+      <main class="dataset-main-panel">
     <div class="split-grid">
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Dataset Registry</h2>
-            <p>优先查看 record count、来源平台和存储路径。</p>
-          </div>
-        </div>
+      <BaseSection :title="t('datasets.listTitle')" :description="t('datasets.listDescription')">
+        <form class="filter-form" @submit.prevent="applyFilters">
+          <label class="field">
+            <span>{{ t('tasks.search') }}</span>
+            <input v-model="filters.q" :placeholder="t('datasets.searchPlaceholder')" />
+          </label>
 
-        <div v-if="datasetsLoading" class="muted">Loading datasets...</div>
-        <div v-else-if="datasetsError" class="error-text">{{ datasetsError }}</div>
+          <label class="field">
+            <span>{{ t('tasks.platform') }}</span>
+            <select v-model="filters.source_platform">
+              <option value="">{{ t('tasks.allPlatforms') }}</option>
+              <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
+                {{ item.label }}
+              </option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>{{ t('datasets.type') }}</span>
+            <select v-model="filters.dataset_type">
+              <option value="">{{ t('datasets.allTypes') }}</option>
+              <option v-for="item in datasetTypes" :key="item" :value="item">{{ datasetTypeLabel(item) }}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>{{ t('tasks.scenario') }}</span>
+            <select v-model="filters.scenario_type">
+              <option value="">{{ t('tasks.allScenarios') }}</option>
+              <option v-for="item in scenarioOptions" :key="item.value" :value="item.value">
+                {{ item.label }}
+              </option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>{{ t('datasets.tags') }}</span>
+            <input v-model="filters.tag" placeholder="spring" />
+          </label>
+
+          <label class="field">
+            <span>{{ t('tasks.limit') }}</span>
+            <input v-model.number="filters.limit" min="1" max="500" step="1" type="number" />
+          </label>
+
+          <div class="actions filter-actions">
+            <button class="primary-button" :disabled="datasetsLoading" type="submit">{{ t('tasks.apply') }}</button>
+            <button class="secondary-button" :disabled="datasetsLoading" type="button" @click="clearFilters">{{ t('tasks.clear') }}</button>
+          </div>
+        </form>
+
+        <LoadingState v-if="datasetsLoading" :title="t('datasets.loading')" />
+        <AppAlert v-else-if="datasetsError" tone="error" :title="t('common.loadFailed')" :message="datasetsError" />
         <div v-else class="dataset-list">
           <article v-for="item in datasetItems" :key="item.id" class="dataset-item">
             <div class="dataset-main">
               <div>
                 <strong>{{ item.dataset_name }}</strong>
-                <p>{{ item.source_platform }} · {{ item.scenario_type || '-' }} · {{ item.dataset_type }} · {{ item.record_count }} records</p>
+                <p>
+                  {{ item.source_platform }} · {{ scenarioLabel(item.scenario_type) }} ·
+                  {{ datasetTypeLabel(item.dataset_type) }} ·
+                  {{ t('datasets.recordCount', { count: item.record_count }) }}
+                </p>
               </div>
-              <span class="dataset-id">{{ item.id }}</span>
+              <StatusBadge :label="datasetTypeLabel(item.dataset_type)" tone="info" />
             </div>
-            <div class="dataset-meta">{{ item.storage_uri || 'No storage URI' }}</div>
+            <div class="dataset-meta">
+              <span>{{ item.storage_uri || t('datasets.noStorage') }}</span>
+              <code>{{ item.id }}</code>
+            </div>
             <div class="actions">
-              <button class="secondary-button" type="button" @click="loadPreview(item.id)">Preview</button>
+              <RouterLink class="secondary-button link-button" :to="{ name: 'dataset-detail', params: { datasetId: item.id } }">
+                {{ t('datasets.viewDetail') }}
+              </RouterLink>
+              <button class="secondary-button" type="button" @click="loadPreview(item.id)">{{ t('datasets.preview') }}</button>
+              <PermissionGate area="workflow" compact>
               <button class="secondary-button destructive" type="button" @click="removeDataset(item.id)">
-                Delete
+                {{ t('datasets.delete') }}
               </button>
+              </PermissionGate>
             </div>
           </article>
-          <div v-if="!datasetItems.length" class="muted">No datasets yet.</div>
+          <EmptyState v-if="!datasetItems.length" :title="t('datasets.emptyTitle')" :description="t('datasets.emptyDescription')" />
+          <PaginationBar
+            :total="datasetTotal"
+            :limit="filters.limit"
+            :offset="filters.offset"
+            :loading="datasetsLoading"
+            @change="changeDatasetPage"
+          />
         </div>
-      </section>
+      </BaseSection>
 
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Dataset Preview</h2>
-            <p>{{ selectedDataset ? selectedDataset.dataset_name : '选择左侧数据集查看预览。' }}</p>
-          </div>
-        </div>
-
+      <BaseSection :title="t('datasets.previewTitle')" :description="selectedDataset ? selectedDataset.dataset_name : t('datasets.previewDescription')">
         <div v-if="preview?.columns.length" class="preview-wrap">
           <table class="preview-table">
             <thead>
@@ -228,8 +387,10 @@ async function removeDataset(datasetId: string) {
             </tbody>
           </table>
         </div>
-        <div v-else class="muted">No preview loaded.</div>
-      </section>
+        <EmptyState v-else :title="t('datasets.previewEmptyTitle')" :description="t('datasets.previewEmptyDescription')" />
+      </BaseSection>
+    </div>
+      </main>
     </div>
   </section>
 </template>
@@ -237,9 +398,47 @@ async function removeDataset(datasetId: string) {
 <style scoped>
 .page-grid,
 .dataset-form,
-.dataset-list {
+.dataset-list,
+.filter-form {
   display: grid;
   gap: 18px;
+}
+
+.dataset-workspace {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.dataset-side-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 104px);
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.dataset-main-panel {
+  min-width: 0;
+}
+
+.dataset-side-panel .grid-two {
+  grid-template-columns: 1fr;
+}
+
+.dataset-side-panel .field-empty {
+  display: none;
+}
+
+.dataset-side-panel .actions {
+  display: grid;
+}
+
+.dataset-side-panel .primary-button {
+  width: 100%;
 }
 
 .split-grid {
@@ -273,6 +472,12 @@ async function removeDataset(datasetId: string) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.filter-form {
+  grid-template-columns: 1.3fr repeat(5, minmax(0, 1fr)) auto;
+  align-items: end;
+  margin-bottom: 18px;
 }
 
 .field {
@@ -334,6 +539,10 @@ async function removeDataset(datasetId: string) {
   align-items: center;
 }
 
+.filter-actions {
+  flex-wrap: nowrap;
+}
+
 .primary-button,
 .secondary-button {
   border: none;
@@ -351,6 +560,12 @@ async function removeDataset(datasetId: string) {
 .secondary-button {
   background: rgba(226, 232, 240, 0.9);
   color: #1e293b;
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 .secondary-button.destructive {
@@ -392,8 +607,20 @@ async function removeDataset(datasetId: string) {
 }
 
 @media (max-width: 980px) {
+  .dataset-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .dataset-side-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
   .split-grid,
-  .grid-two {
+  .grid-two,
+  .filter-form {
     grid-template-columns: 1fr;
   }
 }

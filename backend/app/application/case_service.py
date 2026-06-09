@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from ..api.schemas.case import CaseCreateRequest, CaseUpdateRequest
-from ..domain.models.case import Case, CaseLink, CaseLinkType, CaseNote
+from ..domain.models.case import Case, CaseLink, CaseLinkType, CaseNote, CasePriority, CaseStatus
 from ..domain.repositories.case_repository import CaseRepository
 from .analysis_service import AnalysisService
 from .dataset_service import DatasetService
@@ -31,8 +31,59 @@ class CaseService:
     def set_evidence_packet_resolver(self, resolver: Callable[[str], Any | None]) -> None:
         self.evidence_packet_resolver = resolver
 
-    def list_cases(self) -> list[Case]:
-        return self.repository.list_cases()
+    def list_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        priority: CasePriority | None = None,
+        case_type: str = "",
+        owner: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Case]:
+        cases, _ = self.list_cases_page(
+            status=status,
+            priority=priority,
+            case_type=case_type,
+            owner=owner,
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
+        return cases
+
+    def list_cases_page(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        priority: CasePriority | None = None,
+        case_type: str = "",
+        owner: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[Case], int]:
+        cases = self.repository.list_cases()
+        if status:
+            cases = [case for case in cases if case.status == status]
+        if priority:
+            cases = [case for case in cases if case.priority == priority]
+        if case_type:
+            cases = [case for case in cases if case.case_type == case_type]
+        if owner:
+            owner_needle = owner.strip().lower()
+            cases = [case for case in cases if owner_needle in case.owner.lower()]
+        if query:
+            needle = query.strip().lower()
+            if needle:
+                cases = [case for case in cases if self._matches_query(case, needle)]
+        total = len(cases)
+        if offset > 0:
+            cases = cases[offset:]
+        if limit is not None:
+            cases = cases[:limit]
+        return cases, total
 
     def get_case(self, case_id: str) -> Case | None:
         return self.repository.get_case(case_id)
@@ -253,3 +304,15 @@ class CaseService:
         if link.link_type == CaseLinkType.EVIDENCE_PACKET:
             return str(resolved.get("packet_name") or link.target_id)
         return link.target_id
+
+    def _matches_query(self, case: Case, needle: str) -> bool:
+        values = [
+            case.id,
+            case.case_name,
+            case.case_type,
+            case.status.value,
+            case.priority.value,
+            case.summary,
+            case.owner,
+        ]
+        return any(needle in str(value).lower() for value in values)

@@ -143,6 +143,8 @@ def test_case_can_attach_objects_add_note_and_build_timeline(tmp_path):
         assert detail["objects"]["signals"][0]["id"] == signal_id
         assert detail["objects"]["entities"][0]["id"] == entity_id
         assert detail["objects"]["analysis_outputs"][0]["id"] == output_id
+        assert {event["action"] for event in detail["audit_events"]} >= {"case.create", "case.link.add", "case.note.add"}
+        assert all(event["target_type"] == "case" for event in detail["audit_events"])
 
         timeline_response = client.get(f"/api/cases/{case_id}/timeline")
         assert timeline_response.status_code == 200
@@ -187,6 +189,66 @@ def test_case_duplicate_link_is_merged(tmp_path):
 
         detail = client.get(f"/api/cases/{case_id}").json()
         assert len(detail["links"]) == 1
+    finally:
+        set_container(original_container)
+
+
+def test_case_list_supports_filters_search_and_pagination(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        samples = [
+            {
+                "case_name": "小红书导流链路专项",
+                "case_type": "lead_diversion",
+                "status": "investigating",
+                "priority": "high",
+                "summary": "围绕联系方式 abc12345 的调查",
+                "owner": "alice",
+            },
+            {
+                "case_name": "闲鱼商品异常价格专项",
+                "case_type": "product_risk",
+                "status": "open",
+                "priority": "medium",
+                "summary": "低价商品和模板复用排查",
+                "owner": "bob",
+            },
+            {
+                "case_name": "微博话题扩散复核",
+                "case_type": "topic_watch",
+                "status": "closed",
+                "priority": "low",
+                "summary": "同话术传播簇已复核",
+                "owner": "alice",
+            },
+        ]
+        for item in samples:
+            response = client.post("/api/cases", json=item)
+            assert response.status_code == 200
+
+        high_response = client.get("/api/cases", params={"priority": "high"})
+        assert high_response.status_code == 200
+        assert [item["case_name"] for item in high_response.json()["cases"]] == ["小红书导流链路专项"]
+
+        owner_response = client.get("/api/cases", params={"owner": "ali"})
+        assert owner_response.status_code == 200
+        assert len(owner_response.json()["cases"]) == 2
+
+        query_response = client.get("/api/cases", params={"q": "abc12345"})
+        assert query_response.status_code == 200
+        assert query_response.json()["cases"][0]["case_type"] == "lead_diversion"
+
+        type_response = client.get("/api/cases", params={"case_type": "product_risk", "status": "open"})
+        assert type_response.status_code == 200
+        assert type_response.json()["cases"][0]["owner"] == "bob"
+
+        page_response = client.get("/api/cases", params={"limit": 1, "offset": 1})
+        assert page_response.status_code == 200
+        assert len(page_response.json()["cases"]) == 1
+        assert page_response.json()["total"] == 3
     finally:
         set_container(original_container)
 

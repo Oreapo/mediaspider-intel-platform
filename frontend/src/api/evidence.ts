@@ -1,7 +1,5 @@
-import { http } from '../lib/http'
+import { apiDownloadUrl, http } from '../lib/http'
 import type { EvidencePacket } from '../types'
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
 export interface EvidencePacketCreatePayload {
   case_id: string
@@ -29,5 +27,5 @@ export async function deleteEvidencePacket(packetId: string, deleteStorage = fal
 }
 
 export function evidenceDownloadUrl(packetId: string) {
-  return `${BASE_URL}/evidence/${packetId}/download`
+  return apiDownloadUrl(`/evidence/${packetId}/download`)
 }

@@ -16,7 +16,13 @@ from app.api.dependencies.container import AppContainer
 from app.main import app
 
 
-def _create_report_case(client: TestClient, tmp_path: Path) -> str:
+def _auth_headers(client: TestClient) -> dict[str, str]:
+    response = client.post("/api/auth/login", json={"username": "analyst", "password": "secret"})
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def _create_report_case(client: TestClient, tmp_path: Path, headers: dict[str, str] | None = None) -> str:
     dataset_file_dir = tmp_path / "storage" / "dataset_files"
     dataset_file_dir.mkdir(parents=True, exist_ok=True)
     sample_path = dataset_file_dir / "report_source.jsonl"
@@ -33,6 +39,7 @@ def _create_report_case(client: TestClient, tmp_path: Path) -> str:
             "scenario_type": "lead_diversion",
             "storage_uri": "report_source.jsonl",
         },
+        headers=headers,
     ).json()["dataset"]["id"]
     signal_id = client.post(
         "/api/signals",
@@ -53,6 +60,7 @@ def _create_report_case(client: TestClient, tmp_path: Path) -> str:
                 }
             },
         },
+        headers=headers,
     ).json()["signal"]["id"]
     case_id = client.post(
         "/api/cases",
@@ -63,21 +71,25 @@ def _create_report_case(client: TestClient, tmp_path: Path) -> str:
             "summary": "围绕联系方式 abc12345 的研判报告。",
             "owner": "analyst",
         },
+        headers=headers,
     ).json()["case"]["id"]
     for link_type, target_id in [("dataset", dataset_id), ("signal", signal_id)]:
         response = client.post(
             f"/api/cases/{case_id}/links",
             json={"link_type": link_type, "target_id": target_id, "label": link_type},
+            headers=headers,
         )
         assert response.status_code == 200
     note_response = client.post(
         f"/api/cases/{case_id}/notes",
         json={"author": "analyst", "body": "已确认 source_ref 可以回溯到原始记录。"},
+        headers=headers,
     )
     assert note_response.status_code == 200
     packet_response = client.post(
         "/api/evidence/packets",
         json={"case_id": case_id, "packet_name": "报告证据包"},
+        headers=headers,
     )
     assert packet_response.status_code == 200
     return case_id
@@ -115,9 +127,53 @@ def test_generate_report_from_case_and_download(tmp_path):
         assert detail_response.status_code == 200
         assert detail_response.json()["report"]["storage_uri"].endswith(".md")
 
+        update_response = client.patch(
+            f"/api/reports/{report['id']}",
+            json={
+                "report_name": "已编辑研判报告",
+                "status": "draft",
+                "content_markdown": "# 已编辑研判报告\n\n人工补充结论。",
+            },
+        )
+        assert update_response.status_code == 200
+        updated = update_response.json()["report"]
+        assert updated["report_name"] == "已编辑研判报告"
+        assert updated["status"] == "draft"
+        assert "人工补充结论" in updated["content_markdown"]
+
         download_response = client.get(f"/api/reports/{report['id']}/download")
         assert download_response.status_code == 200
-        assert "导流链路研判报告" in download_response.text
+        assert "已编辑研判报告" in download_response.text
+    finally:
+        set_container(original_container)
+
+
+def test_report_download_accepts_query_access_token_when_auth_required(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDIASPIDER_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_USERS", "analyst:secret:analyst:Risk Analyst")
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        headers = _auth_headers(client)
+        case_id = _create_report_case(client, tmp_path, headers=headers)
+        report = client.post(
+            "/api/reports",
+            json={
+                "case_id": case_id,
+                "report_name": "查询 Token 下载报告",
+                "report_type": "investigation_brief",
+            },
+            headers=headers,
+        ).json()["report"]
+        token = headers["Authorization"].split(" ", 1)[1]
+
+        response = client.get(f"/api/reports/{report['id']}/download", params={"access_token": token})
+
+        assert response.status_code == 200
+        assert "查询 Token 下载报告" in response.text
     finally:
         set_container(original_container)
 

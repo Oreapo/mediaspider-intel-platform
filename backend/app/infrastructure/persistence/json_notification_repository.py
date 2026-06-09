@@ -47,7 +47,14 @@ class JsonNotificationRepository(NotificationRepository):
 
     def save_delivery(self, delivery: NotificationDelivery) -> NotificationDelivery:
         deliveries = self._load_deliveries()
-        deliveries.append(delivery)
+        replaced = False
+        for index, existing in enumerate(deliveries):
+            if existing.id == delivery.id:
+                deliveries[index] = delivery
+                replaced = True
+                break
+        if not replaced:
+            deliveries.append(delivery)
         self._save_deliveries(deliveries)
         return delivery
 

@@ -1,17 +1,20 @@
 import { onMounted, ref } from 'vue'
-import { listDatasets } from '../api/datasets'
+import { listDatasetsPage, type DatasetListFilters } from '../api/datasets'
 import type { Dataset } from '../types'
 
 export function useDatasets() {
   const items = ref<Dataset[]>([])
+  const total = ref(0)
   const isLoading = ref(false)
   const error = ref('')
 
-  async function fetchItems() {
+  async function fetchItems(filters?: DatasetListFilters) {
     isLoading.value = true
     error.value = ''
     try {
-      items.value = await listDatasets()
+      const result = await listDatasetsPage(filters)
+      items.value = result.datasets
+      total.value = result.total
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -21,5 +24,5 @@ export function useDatasets() {
 
   onMounted(fetchItems)
 
-  return { items, isLoading, error, fetchItems }
+  return { items, total, isLoading, error, fetchItems }
 }

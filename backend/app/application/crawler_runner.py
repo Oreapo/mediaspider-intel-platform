@@ -111,6 +111,39 @@ class MediaCrawlerProcessRunner:
                 error_message=f"MediaCrawler timed out after {timeout_seconds} seconds",
             )
 
+    def diagnose(self, task: CollectionTask, run_id: str = "dry-run") -> dict[str, object]:
+        output_root = self.storage_root / "crawler_run_outputs" / run_id
+        log_path = self.storage_root / "crawler_logs" / f"{run_id}.log"
+        errors: list[str] = []
+        warnings: list[str] = []
+        command: list[str] = []
+        redacted_command: list[str] = []
+
+        if not (self.media_crawler_root / "main.py").exists():
+            errors.append(f"MediaCrawler root not found: {self.media_crawler_root}")
+        try:
+            command, redacted_command = self._build_command(task, output_root)
+        except ValueError as exc:
+            errors.append(str(exc))
+
+        if task.runtime_payload_json.get("cookies"):
+            warnings.append("cookies are configured and will be redacted from diagnostics")
+        if task.runtime_payload_json.get("state_file"):
+            warnings.append("state_file is configured on the profile; MediaCrawler CLI cookie support is used when cookies are present")
+        if not task.runtime_payload_json.get("headless", False):
+            warnings.append("headless is disabled; server environments may require a visible browser session")
+
+        return {
+            "ready": not errors,
+            "media_crawler_root": str(self.media_crawler_root),
+            "output_root": str(output_root),
+            "log_path": str(log_path),
+            "command": redacted_command,
+            "raw_command": command if not task.runtime_payload_json.get("cookies") else [],
+            "errors": errors,
+            "warnings": warnings,
+        }
+
     def _validate_root(self) -> None:
         if not (self.media_crawler_root / "main.py").exists():
             raise ValueError(f"MediaCrawler root not found: {self.media_crawler_root}")
@@ -159,11 +192,20 @@ class MediaCrawlerProcessRunner:
             command.extend(["--ip_proxy_pool_count", str(self._positive_int(proxy_pool_count, 2, 1))])
 
         if crawler_type == "search":
-            command.extend(["--keywords", ",".join(self._string_list(task.task_payload_json.get("keywords")))])
+            keywords = self._string_list(task.task_payload_json.get("keywords"))
+            if not keywords:
+                raise ValueError("search crawler requires task_payload_json.keywords")
+            command.extend(["--keywords", ",".join(keywords)])
         elif crawler_type == "detail":
-            command.extend(["--specified_id", ",".join(self._string_list(task.task_payload_json.get("specified_ids")))])
+            specified_ids = self._string_list(task.task_payload_json.get("specified_ids"))
+            if not specified_ids:
+                raise ValueError("detail crawler requires task_payload_json.specified_ids")
+            command.extend(["--specified_id", ",".join(specified_ids)])
         elif crawler_type == "creator":
-            command.extend(["--creator_id", ",".join(self._string_list(task.task_payload_json.get("creator_ids")))])
+            creator_ids = self._string_list(task.task_payload_json.get("creator_ids"))
+            if not creator_ids:
+                raise ValueError("creator crawler requires task_payload_json.creator_ids")
+            command.extend(["--creator_id", ",".join(creator_ids)])
 
         cookies = task.runtime_payload_json.get("cookies")
         redacted_command = list(command)

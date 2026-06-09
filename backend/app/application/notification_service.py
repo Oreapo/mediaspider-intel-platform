@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import smtplib
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
+from email.message import EmailMessage
 from typing import Any
 
 from ..api.schemas.notification import NotificationRuleCreateRequest, NotificationRuleUpdateRequest
@@ -73,6 +75,138 @@ class NotificationService:
 
     def list_deliveries(self) -> list[NotificationDelivery]:
         return self.repository.list_deliveries()
+
+    def list_inbox(
+        self,
+        *,
+        unread_only: bool = False,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        deliveries = [
+            delivery
+            for delivery in self.search_deliveries(
+                status=NotificationDeliveryStatus.SENT,
+                channel=NotificationChannel.INTERNAL_INBOX,
+                query=query,
+            )
+            if not unread_only or not self._is_delivery_read(delivery)
+        ]
+        total = len(deliveries)
+        unread_count = sum(
+            1
+            for delivery in self.search_deliveries(
+                status=NotificationDeliveryStatus.SENT,
+                channel=NotificationChannel.INTERNAL_INBOX,
+            )
+            if not self._is_delivery_read(delivery)
+        )
+        if offset:
+            deliveries = deliveries[offset:]
+        if limit is not None:
+            deliveries = deliveries[:limit]
+        return {
+            "items": [self._inbox_item(delivery) for delivery in deliveries],
+            "total": total,
+            "unread_count": unread_count,
+        }
+
+    def update_inbox_item(self, delivery_id: str, read: bool = True) -> dict[str, Any]:
+        delivery = self._get_delivery(delivery_id)
+        if delivery is None or delivery.channel != NotificationChannel.INTERNAL_INBOX:
+            raise ValueError(f"Inbox item {delivery_id} not found")
+        metadata = dict(delivery.payload_json.get("_inbox") or {})
+        if read:
+            metadata["read_at"] = datetime.utcnow().isoformat()
+        else:
+            metadata.pop("read_at", None)
+        payload = {**delivery.payload_json, "_inbox": metadata}
+        updated = delivery.model_copy(update={"payload_json": payload, "updated_at": datetime.utcnow()})
+        return self._inbox_item(self.repository.save_delivery(updated))
+
+    def mark_all_inbox_read(self) -> dict[str, Any]:
+        count = 0
+        for delivery in self.repository.list_deliveries():
+            if delivery.channel != NotificationChannel.INTERNAL_INBOX or self._is_delivery_read(delivery):
+                continue
+            self.update_inbox_item(delivery.id, read=True)
+            count += 1
+        return {"updated_count": count}
+
+    def retry_delivery(self, delivery_id: str) -> NotificationDelivery:
+        delivery = self._get_delivery(delivery_id)
+        if delivery is None:
+            raise ValueError(f"Notification delivery {delivery_id} not found")
+        if delivery.status != NotificationDeliveryStatus.FAILED:
+            raise ValueError("Only failed deliveries can be retried")
+        rule = self.repository.get_rule(delivery.rule_id)
+        if rule is None:
+            raise ValueError(f"Notification rule {delivery.rule_id} not found")
+
+        attempted_at = datetime.utcnow().isoformat()
+        retry_count = delivery.retry_count + 1
+        try:
+            if delivery.channel == NotificationChannel.WEBHOOK:
+                self._send_webhook(rule, delivery.payload_json)
+            elif delivery.channel == NotificationChannel.EMAIL:
+                self._send_email(rule, delivery.payload_json)
+            elif delivery.channel == NotificationChannel.INTERNAL_INBOX:
+                self._send_internal_inbox(rule, delivery.payload_json)
+            updated = delivery.model_copy(
+                update={
+                    "status": NotificationDeliveryStatus.SENT,
+                    "error_message": "",
+                    "retry_count": retry_count,
+                    "last_attempt_at": attempted_at,
+                    "updated_at": datetime.utcnow(),
+                }
+            )
+        except Exception as exc:
+            updated = delivery.model_copy(
+                update={
+                    "error_message": str(exc),
+                    "retry_count": retry_count,
+                    "last_attempt_at": attempted_at,
+                    "updated_at": datetime.utcnow(),
+                }
+            )
+        return self.repository.save_delivery(updated)
+
+    def search_deliveries(
+        self,
+        *,
+        rule_id: str | None = None,
+        status: NotificationDeliveryStatus | None = None,
+        channel: NotificationChannel | None = None,
+        target_type: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[NotificationDelivery]:
+        deliveries = self.repository.list_deliveries()
+        normalized_query = query.strip().lower()
+        normalized_target_type = target_type.strip().lower()
+
+        filtered: list[NotificationDelivery] = []
+        for delivery in deliveries:
+            if rule_id and delivery.rule_id != rule_id:
+                continue
+            if status and delivery.status != status:
+                continue
+            if channel and delivery.channel != channel:
+                continue
+            if normalized_target_type and delivery.target_type.lower() != normalized_target_type:
+                continue
+            if normalized_query and normalized_query not in self._delivery_search_text(delivery):
+                continue
+            filtered.append(delivery)
+
+        if offset:
+            filtered = filtered[offset:]
+        if limit is not None:
+            filtered = filtered[:limit]
+        return filtered
 
     def run_scheduled_digests(self, now: datetime | None = None) -> dict[str, Any]:
         current = now or datetime.utcnow()
@@ -296,8 +430,90 @@ class NotificationService:
             status=status,
             payload_json=payload,
             error_message=error_message,
+            last_attempt_at=datetime.utcnow().isoformat(),
         )
         return self.repository.save_delivery(delivery)
+
+    def _get_delivery(self, delivery_id: str) -> NotificationDelivery | None:
+        for delivery in self.repository.list_deliveries():
+            if delivery.id == delivery_id:
+                return delivery
+        return None
+
+    def _is_delivery_read(self, delivery: NotificationDelivery) -> bool:
+        inbox = delivery.payload_json.get("_inbox")
+        return isinstance(inbox, dict) and bool(inbox.get("read_at"))
+
+    def _inbox_item(self, delivery: NotificationDelivery) -> dict[str, Any]:
+        payload = delivery.payload_json
+        events = payload.get("events") if isinstance(payload, dict) else []
+        event_count = len(events) if isinstance(events, list) else int(payload.get("event_count") or 0)
+        target_event = None
+        if isinstance(events, list):
+            target_event = next(
+                (
+                    event
+                    for event in events
+                    if isinstance(event, dict)
+                    and event.get("target_type") == delivery.target_type
+                    and event.get("target_id") == delivery.target_id
+                ),
+                None,
+            )
+        target_payload = target_event.get("payload") if isinstance(target_event, dict) else {}
+        if not isinstance(target_payload, dict):
+            target_payload = {}
+        inbox = payload.get("_inbox") if isinstance(payload, dict) else {}
+        read_at = inbox.get("read_at") if isinstance(inbox, dict) else None
+        return {
+            "id": delivery.id,
+            "rule_id": delivery.rule_id,
+            "rule_name": payload.get("rule_name", "") if isinstance(payload, dict) else "",
+            "target_type": delivery.target_type,
+            "target_id": delivery.target_id,
+            "status": delivery.status.value,
+            "read": bool(read_at),
+            "read_at": read_at,
+            "created_at": delivery.created_at.isoformat(),
+            "event_count": event_count,
+            "title": self._notification_title(delivery, target_payload),
+            "summary": self._notification_summary(delivery, target_payload),
+            "payload_json": payload,
+        }
+
+    def _notification_title(self, delivery: NotificationDelivery, target_payload: dict[str, Any]) -> str:
+        if delivery.target_type == "signal":
+            return str(target_payload.get("summary") or f"风险信号 {delivery.target_id}")
+        if delivery.target_type == "case":
+            case = target_payload.get("case") if isinstance(target_payload.get("case"), dict) else target_payload
+            return str(case.get("case_name") or f"案件 {delivery.target_id}")
+        if delivery.target_type == "evidence_packet":
+            return str(target_payload.get("packet_name") or f"证据包 {delivery.target_id}")
+        return f"{delivery.target_type} {delivery.target_id}"
+
+    def _notification_summary(self, delivery: NotificationDelivery, target_payload: dict[str, Any]) -> str:
+        if delivery.target_type == "signal":
+            return f"{target_payload.get('risk_level', '-')} · {target_payload.get('signal_type', '-')}"
+        if delivery.target_type == "case":
+            case = target_payload.get("case") if isinstance(target_payload.get("case"), dict) else target_payload
+            return f"{case.get('status', '-')} · {case.get('priority', '-')}"
+        if delivery.target_type == "evidence_packet":
+            return str(target_payload.get("storage_uri") or "")
+        return ""
+
+    def _delivery_search_text(self, delivery: NotificationDelivery) -> str:
+        return " ".join(
+            [
+                delivery.id,
+                delivery.rule_id,
+                delivery.target_type,
+                delivery.target_id,
+                delivery.channel.value,
+                delivery.status.value,
+                delivery.error_message,
+                json.dumps(delivery.payload_json, ensure_ascii=False, sort_keys=True),
+            ]
+        ).lower()
 
     def _send_internal_inbox(self, rule: NotificationRule, payload: dict[str, Any]) -> None:
         if not isinstance(payload, dict) or "events" not in payload:
@@ -307,6 +523,68 @@ class NotificationService:
         recipients = rule.channel_config_json.get("email_recipients") or []
         if not recipients:
             raise ValueError("email channel requires channel_config_json.email_recipients")
+        smtp_host = rule.channel_config_json.get("smtp_host")
+        if not smtp_host:
+            raise ValueError("email channel requires channel_config_json.smtp_host")
+        smtp_port = int(rule.channel_config_json.get("smtp_port") or 25)
+        sender = rule.channel_config_json.get("smtp_from") or rule.channel_config_json.get("smtp_username")
+        if not sender:
+            raise ValueError("email channel requires channel_config_json.smtp_from")
+        if isinstance(recipients, str):
+            recipients = [item.strip() for item in recipients.split(",") if item.strip()]
+        if not isinstance(recipients, list) or not all(isinstance(item, str) and item.strip() for item in recipients):
+            raise ValueError("email channel email_recipients must be a list of email addresses")
+
+        message = EmailMessage()
+        message["From"] = sender
+        message["To"] = ", ".join(recipients)
+        message["Subject"] = self._email_subject(rule, payload)
+        message.set_content(self._email_body(payload))
+
+        timeout = int(rule.channel_config_json.get("smtp_timeout_seconds") or 10)
+        use_tls = bool(rule.channel_config_json.get("smtp_use_tls", False))
+        username = rule.channel_config_json.get("smtp_username")
+        password = rule.channel_config_json.get("smtp_password")
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=timeout) as smtp:
+            if use_tls:
+                smtp.starttls()
+            if username and password:
+                smtp.login(username, password)
+            smtp.send_message(message)
+
+    def _email_subject(self, rule: NotificationRule, payload: dict[str, Any]) -> str:
+        count = int(payload.get("event_count") or 0)
+        return f"[MediaSpider] {rule.rule_name} · {count} events"
+
+    def _email_body(self, payload: dict[str, Any]) -> str:
+        lines = [
+            "MediaSpider intelligence digest",
+            "",
+            f"Rule: {payload.get('rule_name', '-')}",
+            f"Window: {payload.get('since', '-')} -> {payload.get('until', '-')}",
+            f"Events: {payload.get('event_count', 0)}",
+            "",
+        ]
+        events = payload.get("events") if isinstance(payload.get("events"), list) else []
+        for index, event in enumerate(events, start=1):
+            if not isinstance(event, dict):
+                continue
+            target_type = event.get("target_type", "-")
+            target_id = event.get("target_id", "-")
+            item = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            title = self._event_title(str(target_type), item)
+            lines.append(f"{index}. {target_type}/{target_id} - {title}")
+        return "\n".join(lines).strip() + "\n"
+
+    def _event_title(self, target_type: str, payload: dict[str, Any]) -> str:
+        if target_type == "signal":
+            return str(payload.get("summary") or payload.get("signal_type") or "risk signal")
+        if target_type == "case":
+            case = payload.get("case") if isinstance(payload.get("case"), dict) else payload
+            return str(case.get("case_name") or "case")
+        if target_type == "evidence_packet":
+            return str(payload.get("packet_name") or "evidence packet")
+        return str(payload.get("id") or "event")
 
     def _send_webhook(self, rule: NotificationRule, payload: dict[str, Any]) -> None:
         url = rule.channel_config_json.get("webhook_url")

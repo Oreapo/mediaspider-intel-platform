@@ -2,18 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..dependencies import get_notification_service
+from ..dependencies import OPERATOR_ROLES, READ_ROLES, WORKFLOW_ROLES, get_notification_service, require_roles
 from ..schemas.notification import (
     NotificationDigestRunRequest,
+    NotificationInboxUpdateRequest,
     NotificationRuleCreateRequest,
     NotificationRuleUpdateRequest,
 )
 from ...application.notification_service import NotificationService
+from ...domain.models.notification import NotificationChannel, NotificationDeliveryStatus
 
 
-router = APIRouter(prefix="/notifications", tags=["notifications"])
+router = APIRouter(prefix="/notifications", tags=["notifications"], dependencies=[Depends(require_roles(*READ_ROLES))])
 
 
 @router.get("/rules")
@@ -21,7 +23,7 @@ def list_notification_rules(service: NotificationService = Depends(get_notificat
     return {"rules": [rule.model_dump(mode="json") for rule in service.list_rules()]}
 
 
-@router.post("/rules")
+@router.post("/rules", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
 def create_notification_rule(
     payload: NotificationRuleCreateRequest,
     service: NotificationService = Depends(get_notification_service),
@@ -41,7 +43,7 @@ def get_notification_rule(rule_id: str, service: NotificationService = Depends(g
     return {"rule": rule.model_dump(mode="json")}
 
 
-@router.patch("/rules/{rule_id}")
+@router.patch("/rules/{rule_id}", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
 def update_notification_rule(
     rule_id: str,
     payload: NotificationRuleUpdateRequest,
@@ -56,7 +58,7 @@ def update_notification_rule(
     return {"message": "Notification rule updated", "rule": rule.model_dump(mode="json")}
 
 
-@router.delete("/rules/{rule_id}")
+@router.delete("/rules/{rule_id}", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
 def delete_notification_rule(rule_id: str, service: NotificationService = Depends(get_notification_service)):
     deleted = service.delete_rule(rule_id)
     if not deleted:
@@ -65,11 +67,74 @@ def delete_notification_rule(rule_id: str, service: NotificationService = Depend
 
 
 @router.get("/deliveries")
-def list_notification_deliveries(service: NotificationService = Depends(get_notification_service)):
-    return {"deliveries": [delivery.model_dump(mode="json") for delivery in service.list_deliveries()]}
+def list_notification_deliveries(
+    rule_id: str | None = None,
+    status: NotificationDeliveryStatus | None = None,
+    channel: NotificationChannel | None = None,
+    target_type: str = "",
+    q: str = "",
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: NotificationService = Depends(get_notification_service),
+):
+    deliveries = service.search_deliveries(
+        rule_id=rule_id,
+        status=status,
+        channel=channel,
+        target_type=target_type,
+        query=q,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "deliveries": [delivery.model_dump(mode="json") for delivery in deliveries],
+        "total": len(deliveries),
+    }
 
 
-@router.post("/run-scheduled")
+@router.post("/deliveries/{delivery_id}/retry", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
+def retry_notification_delivery(
+    delivery_id: str,
+    service: NotificationService = Depends(get_notification_service),
+):
+    try:
+        delivery = service.retry_delivery(delivery_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    return {"message": "Notification delivery retried", "delivery": delivery.model_dump(mode="json")}
+
+
+@router.get("/inbox")
+def list_notification_inbox(
+    unread_only: bool = False,
+    q: str = "",
+    limit: int | None = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: NotificationService = Depends(get_notification_service),
+):
+    return service.list_inbox(unread_only=unread_only, query=q, limit=limit, offset=offset)
+
+
+@router.patch("/inbox/{delivery_id}", dependencies=[Depends(require_roles(*WORKFLOW_ROLES))])
+def update_notification_inbox_item(
+    delivery_id: str,
+    payload: NotificationInboxUpdateRequest,
+    service: NotificationService = Depends(get_notification_service),
+):
+    try:
+        return {"item": service.update_inbox_item(delivery_id, read=payload.read)}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/inbox/mark-all-read", dependencies=[Depends(require_roles(*WORKFLOW_ROLES))])
+def mark_all_notification_inbox_read(service: NotificationService = Depends(get_notification_service)):
+    return service.mark_all_inbox_read()
+
+
+@router.post("/run-scheduled", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
 def run_scheduled_notifications(
     payload: NotificationDigestRunRequest,
     service: NotificationService = Depends(get_notification_service),

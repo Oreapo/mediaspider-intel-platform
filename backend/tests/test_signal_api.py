@@ -60,6 +60,89 @@ def test_signal_manual_create_and_status_update(tmp_path):
         set_container(original_container)
 
 
+def test_signal_detail_returns_trace_preview_and_linked_cases(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        sample_path = dataset_file_dir / "signal_detail.jsonl"
+        sample_path.write_text(
+            json.dumps(
+                {
+                    "content_id": "note_detail_001",
+                    "title": "导流样本",
+                    "body": "微信 abc12345 领取资料",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_response = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Signal Detail Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+                "storage_uri": "signal_detail.jsonl",
+            },
+        )
+        dataset_id = dataset_response.json()["dataset"]["id"]
+
+        signal_response = client.post(
+            "/api/signals",
+            json={
+                "dataset_id": dataset_id,
+                "signal_type": "contact_point_hit",
+                "signal_source": "manual",
+                "risk_level": "high",
+                "risk_score": 88,
+                "summary": "疑似联系方式或导流点：abc12345",
+                "payload_json": {
+                    "contact_point": "abc12345",
+                    "source_ref": {
+                        "dataset_id": dataset_id,
+                        "row_index": 0,
+                        "source_entity_id": "note_detail_001",
+                    },
+                },
+            },
+        )
+        signal_id = signal_response.json()["signal"]["id"]
+
+        case_response = client.post(
+            "/api/cases",
+            json={
+                "case_name": "Signal Detail Case",
+                "case_type": "lead_diversion",
+                "priority": "high",
+                "summary": "围绕 abc12345 的详情页关联案件",
+            },
+        )
+        case_id = case_response.json()["case"]["id"]
+        link_response = client.post(
+            f"/api/cases/{case_id}/links",
+            json={"link_type": "signal", "target_id": signal_id, "label": "详情页信号"},
+        )
+        assert link_response.status_code == 200
+
+        detail_response = client.get(f"/api/signals/{signal_id}/detail")
+        assert detail_response.status_code == 200
+        detail = detail_response.json()
+        assert detail["signal"]["id"] == signal_id
+        assert detail["dataset"]["id"] == dataset_id
+        assert detail["preview"]["columns"] == ["content_id", "title", "body"]
+        assert detail["preview"]["rows"][0][0] == "note_detail_001"
+        assert detail["linked_cases"][0]["id"] == case_id
+        assert detail["linked_case_details"][0]["links"][0]["target_id"] == signal_id
+    finally:
+        set_container(original_container)
+
+
 def test_signal_extraction_preserves_source_traceability(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container
@@ -125,6 +208,85 @@ def test_signal_extraction_preserves_source_traceability(tmp_path):
         assert source_ref["row_index"] == 0
         assert source_ref["source_entity_id"] == "note_001"
         assert source_ref["raw_ref"] == "https://example.test/note_001"
+    finally:
+        set_container(original_container)
+
+
+def test_signal_list_supports_filters_search_and_pagination(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        dataset_response = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Signal Filter Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+            },
+        )
+        dataset_id = dataset_response.json()["dataset"]["id"]
+        samples = [
+            {
+                "summary": "疑似联系方式或导流点：abc12345",
+                "signal_type": "contact_point_hit",
+                "risk_level": "high",
+                "status": "confirmed",
+                "payload_json": {
+                    "source_ref": {
+                        "dataset_id": dataset_id,
+                        "row_index": 0,
+                        "source_entity_id": "note_contact",
+                    }
+                },
+            },
+            {
+                "summary": "命中风险词：兼职",
+                "signal_type": "risk_term_hit",
+                "risk_level": "medium",
+                "status": "new",
+                "payload_json": {"source_ref": {"dataset_id": dataset_id, "row_index": 1}},
+            },
+            {
+                "summary": "疑似模板复用：2 条内容高度相似",
+                "signal_type": "template_similarity_hit",
+                "risk_level": "high",
+                "status": "reviewing",
+                "payload_json": {"source_ref": {"dataset_id": dataset_id, "row_index": 2}},
+            },
+        ]
+        for item in samples:
+            response = client.post(
+                "/api/signals",
+                json={
+                    "dataset_id": dataset_id,
+                    "signal_source": "test",
+                    "risk_score": 80,
+                    **item,
+                },
+            )
+            assert response.status_code == 200
+
+        high_response = client.get("/api/signals", params={"risk_level": "high"})
+        assert high_response.status_code == 200
+        assert len(high_response.json()["signals"]) == 2
+
+        confirmed_response = client.get("/api/signals", params={"status": "confirmed"})
+        assert confirmed_response.status_code == 200
+        assert [item["summary"] for item in confirmed_response.json()["signals"]] == [
+            "疑似联系方式或导流点：abc12345"
+        ]
+
+        query_response = client.get("/api/signals", params={"q": "note_contact"})
+        assert query_response.status_code == 200
+        assert query_response.json()["signals"][0]["signal_type"] == "contact_point_hit"
+
+        page_response = client.get("/api/signals", params={"limit": 1, "offset": 1})
+        assert page_response.status_code == 200
+        assert len(page_response.json()["signals"]) == 1
+        assert page_response.json()["total"] == 3
     finally:
         set_container(original_container)
 

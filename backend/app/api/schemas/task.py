@@ -42,3 +42,8 @@ class CollectionTaskUpdateRequest(BaseModel):
 class TaskRunStartRequest(BaseModel):
     trigger_type: str = "manual"
     execute_crawler: bool = True
+
+
+class ScheduledTaskRunRequest(BaseModel):
+    now: str | None = None
+    execute_crawler: bool = True

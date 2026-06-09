@@ -1,8 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { deleteReport, generateReport } from '../api/reports'
+import { deleteReport, generateReport, reportDownloadUrl, updateReport } from '../api/reports'
+import AppAlert from '../components/ui/AppAlert.vue'
+import BaseSection from '../components/ui/BaseSection.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FieldError from '../components/ui/FieldError.vue'
+import LoadingState from '../components/ui/LoadingState.vue'
+import PermissionGate from '../components/ui/PermissionGate.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useCases } from '../composables/useCases'
+import { useI18n } from '../composables/useI18n'
 import { useReports } from '../composables/useReports'
+import { requestConfirm } from '../lib/confirm'
+import { required, type ValidationErrors } from '../lib/validation'
 import type { Report } from '../types'
 
 const { items: caseItems } = useCases()
@@ -12,6 +22,7 @@ const {
   error: loadError,
   fetchItems,
 } = useReports()
+const { t } = useI18n()
 
 const form = ref({
   case_id: '',
@@ -19,25 +30,61 @@ const form = ref({
   report_type: 'investigation_brief',
 })
 const selectedReportId = ref('')
+const editorForm = ref({
+  report_name: '',
+  status: 'generated',
+  content_markdown: '',
+})
 const isBusy = ref(false)
 const message = ref('')
 const error = ref('')
+const formErrors = ref<ValidationErrors>({})
+const editorErrors = ref<ValidationErrors>({})
 
 const selectedReport = computed<Report | undefined>(() =>
   reportItems.value.find((item) => item.id === selectedReportId.value),
 )
 
 const stats = computed(() => [
-  { label: 'Reports', value: reportItems.value.length },
-  { label: 'Generated', value: reportItems.value.filter((item) => item.status === 'generated').length },
-  { label: 'Cases', value: new Set(reportItems.value.map((item) => item.case_id)).size },
-  { label: 'Markdown', value: reportItems.value.filter((item) => item.storage_uri.endsWith('.md')).length },
+  { label: t('reports.statsReports'), value: reportItems.value.length },
+  { label: t('reports.statsGenerated'), value: reportItems.value.filter((item) => item.status === 'generated').length },
+  { label: t('reports.statsCases'), value: new Set(reportItems.value.map((item) => item.case_id)).size },
+  { label: t('reports.statsMarkdown'), value: reportItems.value.filter((item) => item.storage_uri.endsWith('.md')).length },
 ])
 
+function validateGenerateForm() {
+  const errors: ValidationErrors = {}
+  const caseError = required(form.value.case_id, t('cases.case'))
+  const nameError = required(form.value.report_name, t('reports.name'))
+
+  if (caseError) errors.case_id = caseError
+  if (nameError) errors.report_name = nameError
+
+  formErrors.value = errors
+  return Object.keys(errors).length === 0
+}
+
+function validateEditorForm() {
+  const errors: ValidationErrors = {}
+  const nameError = required(editorForm.value.report_name, t('reports.name'))
+  const contentError = required(editorForm.value.content_markdown, t('reports.markdownContent'))
+
+  if (nameError) errors.report_name = nameError
+  if (contentError) errors.content_markdown = contentError
+
+  editorErrors.value = errors
+  return Object.keys(errors).length === 0
+}
+
 async function submitReport() {
-  isBusy.value = true
   message.value = ''
   error.value = ''
+  if (!validateGenerateForm()) {
+    error.value = t('reports.fixGenerateErrors')
+    return
+  }
+
+  isBusy.value = true
   try {
     const report = await generateReport({
       case_id: form.value.case_id,
@@ -45,7 +92,7 @@ async function submitReport() {
       report_type: form.value.report_type,
     })
     selectedReportId.value = report.id
-    message.value = 'Report generated.'
+    message.value = t('reports.generatedMessage')
     form.value.report_name = ''
     await fetchItems()
   } catch (err) {
@@ -55,17 +102,82 @@ async function submitReport() {
   }
 }
 
+function selectReport(report: Report) {
+  selectedReportId.value = report.id
+  editorForm.value = {
+    report_name: report.report_name,
+    status: report.status,
+    content_markdown: report.content_markdown,
+  }
+}
+
+async function saveReport() {
+  if (!selectedReport.value) return
+  message.value = ''
+  error.value = ''
+  if (!validateEditorForm()) {
+    error.value = t('reports.fixEditorErrors')
+    return
+  }
+
+  isBusy.value = true
+  try {
+    const report = await updateReport(selectedReport.value.id, {
+      report_name: editorForm.value.report_name,
+      status: editorForm.value.status,
+      content_markdown: editorForm.value.content_markdown,
+    })
+    message.value = t('reports.savedMessage')
+    await fetchItems()
+    selectReport(report)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    isBusy.value = false
+  }
+}
+
 async function removeReport(reportId: string) {
+  const confirmed = await requestConfirm({
+    title: t('reports.deleteTitle'),
+    message: t('reports.deleteMessage'),
+    confirmLabel: t('reports.deleteConfirm'),
+  })
+  if (!confirmed) return
+
   message.value = ''
   error.value = ''
   try {
     await deleteReport(reportId, true)
     if (selectedReportId.value === reportId) selectedReportId.value = ''
-    message.value = 'Report deleted.'
+    message.value = t('reports.deletedMessage')
     await fetchItems()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
+}
+
+function labelValue(value: string) {
+  const key = `enum.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
+}
+
+function reportTypeLabel(value: string) {
+  const key = `reportType.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
+}
+
+function scenarioLabel(value: string) {
+  const key = `scenario.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
+}
+
+function reportSignalCount(report: Report) {
+  const value = report.summary_json.signal_count
+  return typeof value === 'number' ? value : 0
 }
 </script>
 
@@ -78,103 +190,133 @@ async function removeReport(reportId: string) {
       </article>
     </div>
 
-    <section class="surface section-card">
-      <div class="section-head">
-        <div>
-          <h2>Generate Report</h2>
-          <p>从案件详情生成可审计的 Markdown 研判报告，保留信号 source refs。</p>
-        </div>
-      </div>
-
+    <div class="report-workspace">
+      <aside class="report-side-panel">
+        <BaseSection compact :title="t('reports.generateTitle')" :description="t('reports.generateDescription')">
+      <PermissionGate area="analysis">
       <form class="report-form" @submit.prevent="submitReport">
         <div class="grid-two">
           <label class="field">
-            <span>Case</span>
+            <span>{{ t('cases.case') }}</span>
             <select v-model="form.case_id" required>
-              <option value="" disabled>选择案件</option>
+              <option value="" disabled>{{ t('cases.chooseCase') }}</option>
               <option v-for="item in caseItems" :key="item.id" :value="item.id">
-                {{ item.case_name }} · {{ item.case_type }} · {{ item.priority }}
+                {{ item.case_name }} · {{ scenarioLabel(item.case_type) }} · {{ labelValue(item.priority) }}
               </option>
             </select>
+            <FieldError :message="formErrors.case_id" />
           </label>
 
           <label class="field">
-            <span>Report Type</span>
+            <span>{{ t('reports.type') }}</span>
             <select v-model="form.report_type">
-              <option value="investigation_brief">investigation_brief</option>
-              <option value="case_summary">case_summary</option>
-              <option value="evidence_review">evidence_review</option>
+              <option value="investigation_brief">{{ t('reportType.investigation_brief') }}</option>
+              <option value="case_summary">{{ t('reportType.case_summary') }}</option>
+              <option value="evidence_review">{{ t('reportType.evidence_review') }}</option>
             </select>
           </label>
         </div>
 
         <label class="field">
-          <span>Report Name</span>
-          <input v-model="form.report_name" required placeholder="例：导流链路研判报告" />
+          <span>{{ t('reports.name') }}</span>
+          <input v-model="form.report_name" required :placeholder="t('reports.namePlaceholder')" />
+          <FieldError :message="formErrors.report_name" />
         </label>
 
         <div class="actions">
           <button class="primary-button" :disabled="isBusy" type="submit">
-            {{ isBusy ? 'Generating...' : 'Generate Report' }}
+            {{ isBusy ? t('reports.generating') : t('reports.generate') }}
           </button>
-          <span v-if="message" class="success-text">{{ message }}</span>
-          <span v-if="error" class="error-text">{{ error }}</span>
         </div>
       </form>
-    </section>
+      </PermissionGate>
+    </BaseSection>
+
+        <AppAlert v-if="message" tone="success" :title="t('tasks.successTitle')" :message="message" />
+        <AppAlert v-if="error" tone="error" :title="t('tasks.actionFailedTitle')" :message="error" />
+      </aside>
+
+      <main class="report-main-panel">
 
     <section class="split-grid">
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Report Registry</h2>
-            <p>报告记录、下载文件和摘要统计。</p>
-          </div>
-        </div>
-
-        <div v-if="isLoading" class="muted">Loading reports...</div>
-        <div v-else-if="loadError" class="error-text">{{ loadError }}</div>
+      <BaseSection :title="t('reports.listTitle')" :description="t('reports.listDescription')">
+        <LoadingState v-if="isLoading" :title="t('reports.loading')" />
+        <AppAlert v-else-if="loadError" tone="error" :title="t('common.loadFailed')" :message="loadError" />
         <div v-else class="report-list">
           <article v-for="item in reportItems" :key="item.id" class="report-item">
             <div class="report-main">
               <div>
                 <strong>{{ item.report_name }}</strong>
-                <p>{{ item.report_type }} · {{ item.status }} · {{ item.storage_uri || '-' }}</p>
+                <p>{{ reportTypeLabel(item.report_type) }} · {{ labelValue(item.status) }} · {{ item.storage_uri || '-' }}</p>
               </div>
-              <span class="status-badge">{{ item.summary_json.signal_count || 0 }} signals</span>
+              <StatusBadge :label="t('reports.signalCount', { count: reportSignalCount(item) })" tone="info" />
             </div>
             <div class="report-meta">
               <span>{{ item.case_id }}</span>
               <span>{{ item.updated_at }}</span>
             </div>
             <div class="actions">
-              <button class="secondary-button" type="button" @click="selectedReportId = item.id">Inspect</button>
-              <a class="secondary-button link-button" :href="`/api/reports/${item.id}/download`">Download</a>
-              <button class="secondary-button destructive" type="button" @click="removeReport(item.id)">Delete</button>
+              <button class="secondary-button" type="button" @click="selectReport(item)">{{ t('reports.edit') }}</button>
+              <a class="secondary-button link-button" :href="reportDownloadUrl(item.id)">{{ t('cases.download') }}</a>
+              <PermissionGate area="analysis" compact>
+              <button class="secondary-button destructive" type="button" @click="removeReport(item.id)">{{ t('cases.delete') }}</button>
+              </PermissionGate>
             </div>
           </article>
-          <div v-if="!reportItems.length" class="muted">No reports yet.</div>
+          <EmptyState v-if="!reportItems.length" :title="t('reports.emptyTitle')" :description="t('reports.emptyDescription')" />
         </div>
-      </section>
+      </BaseSection>
 
-      <section class="surface section-card preview-card">
-        <div class="section-head">
-          <div>
-            <h2>Report Preview</h2>
-            <p v-if="selectedReport">{{ selectedReport.report_name }}</p>
-            <p v-else>选择一份报告查看 Markdown 内容。</p>
+      <BaseSection
+        class="preview-card"
+        :title="t('reports.editorTitle')"
+        :description="selectedReport ? selectedReport.report_name : t('reports.editorDescription')"
+      >
+        <PermissionGate v-if="selectedReport" area="analysis">
+        <form v-if="selectedReport" class="editor-form" @submit.prevent="saveReport">
+          <div class="grid-two">
+            <label class="field">
+              <span>{{ t('reports.name') }}</span>
+              <input v-model="editorForm.report_name" required />
+              <FieldError :message="editorErrors.report_name" />
+            </label>
+            <label class="field">
+              <span>{{ t('reports.status') }}</span>
+              <select v-model="editorForm.status">
+                <option value="draft">{{ t('enum.draft') }}</option>
+                <option value="generated">{{ t('enum.generated') }}</option>
+                <option value="archived">{{ t('enum.archived') }}</option>
+              </select>
+            </label>
           </div>
-        </div>
-        <pre v-if="selectedReport">{{ selectedReport.content_markdown }}</pre>
-        <div v-else class="muted">No report selected.</div>
-      </section>
+          <label class="field">
+            <span>{{ t('reports.markdownContent') }}</span>
+            <textarea v-model="editorForm.content_markdown" rows="18" />
+            <FieldError :message="editorErrors.content_markdown" />
+          </label>
+          <div class="actions">
+            <button class="primary-button" :disabled="isBusy" type="submit">
+              {{ isBusy ? t('reports.saving') : t('reports.save') }}
+            </button>
+          </div>
+        </form>
+        </PermissionGate>
+        <EmptyState v-else :title="t('reports.noSelectionTitle')" :description="t('reports.noSelectionDescription')" />
+      </BaseSection>
     </section>
+
+    <BaseSection v-if="selectedReport" class="preview-card" :title="t('reports.previewTitle')" :description="t('reports.previewDescription')">
+      <pre>{{ editorForm.content_markdown }}</pre>
+    </BaseSection>
+      </main>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .page-grid,
 .report-form,
+.editor-form,
 .report-list {
   display: grid;
   gap: 18px;
@@ -190,6 +332,44 @@ async function removeReport(reportId: string) {
   display: grid;
   grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.2fr);
   gap: 18px;
+}
+
+.report-workspace {
+  display: grid;
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.report-side-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 104px);
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.report-main-panel {
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.report-side-panel .grid-two {
+  grid-template-columns: 1fr;
+}
+
+.report-side-panel .actions {
+  display: grid;
+}
+
+.report-side-panel .primary-button,
+.report-side-panel .secondary-button {
+  width: 100%;
 }
 
 .section-card,
@@ -238,12 +418,19 @@ async function removeReport(reportId: string) {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   padding: 12px 14px;
   border-radius: 14px;
   border: 1px solid rgba(203, 213, 225, 0.95);
   background: rgba(255, 255, 255, 0.94);
+}
+
+.field textarea {
+  min-height: 360px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .report-item {
@@ -350,6 +537,17 @@ pre {
 @media (max-width: 980px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .report-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .report-side-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .split-grid,

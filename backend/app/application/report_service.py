@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..api.schemas.report import ReportGenerateRequest
+from ..api.schemas.report import ReportGenerateRequest, ReportUpdateRequest
 from ..domain.models.report import Report
 from ..domain.repositories.report_repository import ReportRepository
 from .case_service import CaseService
@@ -23,6 +23,18 @@ class ReportService:
 
     def get_report(self, report_id: str) -> Report | None:
         return self.repository.get_report(report_id)
+
+    def update_report(self, report_id: str, payload: ReportUpdateRequest) -> Report:
+        existing = self.repository.get_report(report_id)
+        if existing is None:
+            raise ValueError(f"Report {report_id} not found")
+        updates = payload.model_dump(exclude_unset=True)
+        if "content_markdown" in updates:
+            storage_uri = existing.storage_uri or f"{existing.id}.md"
+            self._write_report(storage_uri, updates["content_markdown"] or "")
+            updates["storage_uri"] = storage_uri
+        updates["updated_at"] = datetime.utcnow()
+        return self.repository.save_report(existing.model_copy(update=updates))
 
     def generate_report(self, payload: ReportGenerateRequest) -> Report:
         case_detail = self.case_service.get_case_detail(payload.case_id)

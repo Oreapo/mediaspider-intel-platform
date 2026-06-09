@@ -32,9 +32,38 @@ export interface CaseNoteCreatePayload {
   note_type?: string
 }
 
-export async function listCases() {
-  const response = await http.get<{ cases: CaseRecord[] }>('/cases')
-  return response.cases
+export interface CaseListFilters {
+  status?: string
+  priority?: string
+  case_type?: string
+  owner?: string
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export interface CaseListResult {
+  cases: CaseRecord[]
+  total: number
+}
+
+function queryString(filters?: CaseListFilters) {
+  const params = new URLSearchParams()
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value))
+    }
+  })
+  const text = params.toString()
+  return text ? `?${text}` : ''
+}
+
+export function listCasesPage(filters?: CaseListFilters) {
+  return http.get<CaseListResult>(`/cases${queryString(filters)}`)
+}
+
+export async function listCases(filters?: CaseListFilters) {
+  return (await listCasesPage(filters)).cases
 }
 
 export async function createCase(payload: CaseCreatePayload) {

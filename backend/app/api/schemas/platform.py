@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ...domain.models.platform import AuthType, PlatformKey
+
 
 class PlatformFieldOption(BaseModel):
     value: str
@@ -32,3 +34,19 @@ class PlatformTaskModelResponse(BaseModel):
     supported_signal_extractors: list[str] = Field(default_factory=list)
     supported_analysis_types: list[str] = Field(default_factory=list)
     task_fields: list[PlatformFieldSchema]
+
+
+class PlatformProfileCreateRequest(BaseModel):
+    platform: PlatformKey
+    profile_name: str = Field(min_length=1, max_length=100)
+    auth_type: AuthType
+    credentials_ref: str = ""
+    settings_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlatformProfileUpdateRequest(BaseModel):
+    platform: PlatformKey | None = None
+    profile_name: str | None = Field(default=None, min_length=1, max_length=100)
+    auth_type: AuthType | None = None
+    credentials_ref: str | None = None
+    settings_json: dict[str, Any] | None = None

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..dependencies import get_analysis_service
+from ..dependencies import ANALYST_ROLES, READ_ROLES, get_analysis_service, require_roles
 from ..schemas.analysis import AnalysisJobCreateRequest
 from ...application.analysis_service import AnalysisService
 
 
-router = APIRouter(prefix="/analysis", tags=["analysis"])
+router = APIRouter(prefix="/analysis", tags=["analysis"], dependencies=[Depends(require_roles(*READ_ROLES))])
 
 
 @router.get("/jobs")
@@ -15,7 +15,7 @@ def list_analysis_jobs(service: AnalysisService = Depends(get_analysis_service))
     return {"jobs": [job.model_dump(mode="json") for job in service.list_jobs()]}
 
 
-@router.post("/jobs")
+@router.post("/jobs", dependencies=[Depends(require_roles(*ANALYST_ROLES))])
 def create_analysis_job(
     payload: AnalysisJobCreateRequest,
     service: AnalysisService = Depends(get_analysis_service),

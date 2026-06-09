@@ -52,3 +52,5 @@ class NotificationDelivery(TimestampedModel):
     status: NotificationDeliveryStatus
     payload_json: dict[str, Any] = Field(default_factory=dict)
     error_message: str = ""
+    retry_count: int = Field(default=0, ge=0)
+    last_attempt_at: str | None = None

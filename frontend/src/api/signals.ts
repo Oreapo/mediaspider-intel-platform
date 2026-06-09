@@ -1,5 +1,5 @@
 import { http } from '../lib/http'
-import type { Signal } from '../types'
+import type { Signal, SignalDetailPayload } from '../types'
 
 export interface SignalCreatePayload {
   dataset_id: string
@@ -19,9 +19,47 @@ export interface SignalExtractionPayload {
   limit?: number
 }
 
-export async function listSignals() {
-  const response = await http.get<{ signals: Signal[] }>('/signals')
-  return response.signals
+export interface SignalListFilters {
+  dataset_id?: string
+  status?: string
+  risk_level?: string
+  signal_type?: string
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export interface SignalListResult {
+  signals: Signal[]
+  total: number
+}
+
+function queryString(filters?: SignalListFilters) {
+  const params = new URLSearchParams()
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value))
+    }
+  })
+  const text = params.toString()
+  return text ? `?${text}` : ''
+}
+
+export function listSignalsPage(filters?: SignalListFilters) {
+  return http.get<SignalListResult>(`/signals${queryString(filters)}`)
+}
+
+export async function listSignals(filters?: SignalListFilters) {
+  return (await listSignalsPage(filters)).signals
+}
+
+export async function getSignal(signalId: string) {
+  const response = await http.get<{ signal: Signal }>(`/signals/${signalId}`)
+  return response.signal
+}
+
+export async function getSignalDetail(signalId: string) {
+  return http.get<SignalDetailPayload>(`/signals/${signalId}/detail`)
 }
 
 export async function createSignal(payload: SignalCreatePayload) {

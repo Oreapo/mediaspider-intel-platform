@@ -3,54 +3,59 @@ import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import TheSidebar from '../components/layout/TheSidebar.vue'
 import TheHeader from '../components/layout/TheHeader.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 
 const route = useRoute()
 
 const pageMeta = computed(() => {
   const lookup: Record<string, { title: string; description: string }> = {
     '/dashboard': {
-      title: 'Dashboard',
-      description: '平台接入状态、最新数据集、最近分析和运行活动概览。',
+      title: '首页看板',
+      description: '从采集、复核、调查到交付的全链路工作台。',
     },
     '/tasks': {
-      title: 'Tasks',
+      title: '采集任务',
       description: '围绕统一任务模型管理多平台采集任务和运行策略。',
     },
     '/datasets': {
-      title: 'Datasets',
+      title: '数据集',
       description: '把采集结果沉淀成可预览、可筛选、可分析的数据集。',
     },
     '/analysis': {
-      title: 'Analysis',
+      title: '情报分析',
       description: '通用分析、平台专属分析和跨平台情报分析中心。',
     },
     '/signals': {
-      title: 'Signals',
+      title: '风险信号',
       description: '从数据集提取、复核和确认可追溯的风险信号。',
     },
     '/entities': {
-      title: 'Entities',
+      title: '风险实体',
       description: '把信号聚合成账号、商品、卖家、联系方式等风险对象与关系。',
     },
     '/cases': {
-      title: 'Cases',
+      title: '案件',
       description: '把数据集、信号、实体、分析输出和备注组织成可持续追踪的案件。',
     },
     '/evidence': {
-      title: 'Evidence',
+      title: '证据包',
       description: '从案件生成可下载、可追溯的证据包 manifest。',
     },
     '/reports': {
-      title: 'Reports',
+      title: '报告',
       description: '将数据集和分析结果进一步沉淀为情报报告。',
     },
     '/logs': {
-      title: 'Logs',
+      title: '日志',
       description: '统一查看任务运行日志、错误诊断与执行历史。',
     },
     '/settings': {
-      title: 'Settings',
+      title: '设置',
       description: '平台接入、登录态、存储、通知和分析配置。',
+    },
+    '/help': {
+      title: '使用说明',
+      description: '查看平台工作流、功能模块、启动方式和常见问题。',
     },
   }
   return lookup[route.path] ?? lookup['/dashboard']
@@ -65,10 +70,14 @@ const pageMeta = computed(() => {
         <div class="sidebar-inner">
           <TheSidebar />
           <section class="sidebar-status surface-subtle">
-            <small>Product Focus</small>
+            <small>当前能力</small>
             <div class="sidebar-status-row">
               <span class="status-dot" />
-              <span>Collection + Dataset + Signals</span>
+              <span>采集 + 复核 + 案件交付</span>
+            </div>
+            <div class="sidebar-metric">
+              <span>INTEL FLOW</span>
+              <strong>ONLINE</strong>
             </div>
           </section>
         </div>
@@ -87,6 +96,7 @@ const pageMeta = computed(() => {
         </div>
       </main>
     </div>
+    <ConfirmDialog />
   </div>
 </template>
 
@@ -99,31 +109,36 @@ const pageMeta = computed(() => {
 
 .content-wrap {
   display: flex;
-  min-height: calc(100vh - 72px);
+  min-height: calc(100vh - 64px);
 }
 
 .sidebar {
-  width: 264px;
+  width: 284px;
   flex-shrink: 0;
-  border-right: 1px solid rgba(226, 232, 240, 0.8);
-  background: rgba(255, 255, 255, 0.42);
-  backdrop-filter: blur(8px);
+  border-right: 1px solid rgba(24, 45, 68, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(244, 248, 251, 0.72)),
+    linear-gradient(90deg, rgba(29, 78, 116, 0.025) 1px, transparent 1px);
+  background-size: auto, 22px 22px;
+  backdrop-filter: blur(16px);
 }
 
 .sidebar-inner {
   position: sticky;
-  top: 72px;
-  height: calc(100vh - 72px);
-  padding: 18px 16px;
+  top: 64px;
+  height: calc(100vh - 64px);
+  padding: 16px 14px;
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .sidebar-status {
-  margin-top: 18px;
-  padding: 16px;
-  border-radius: 18px;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: var(--radius);
 }
 
 .sidebar-status small {
@@ -152,22 +167,56 @@ const pageMeta = computed(() => {
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
 }
 
+.sidebar-metric {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(190, 202, 216, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sidebar-metric span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.sidebar-metric strong {
+  color: #0f766e;
+  font-size: 12px;
+}
+
 .main {
   flex: 1;
   min-width: 0;
-  padding: 24px;
+  padding: 22px 24px 32px;
 }
 
 .main-inner {
-  max-width: 1440px;
-  margin: 0 auto;
+  width: min(100%, 1760px);
+  margin: 0;
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .page-hero {
-  border-radius: 26px;
-  padding: 24px;
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  padding: 18px 22px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 253, 0.88)),
+    var(--card);
+}
+
+.page-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, var(--primary), var(--accent));
 }
 
 .page-title {
@@ -177,8 +226,8 @@ const pageMeta = computed(() => {
 
 .page-title h1 {
   margin: 0;
-  font-size: 40px;
-  letter-spacing: -0.05em;
+  font-size: clamp(24px, 2vw, 32px);
+  letter-spacing: 0;
 }
 
 .page-desc {
@@ -204,7 +253,7 @@ const pageMeta = computed(() => {
   }
 
   .main {
-    padding: 16px;
+    padding: 14px;
   }
 }
 </style>

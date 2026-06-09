@@ -2,17 +2,38 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..dependencies import get_dataset_service
+from ..dependencies import READ_ROLES, WORKFLOW_ROLES, get_dataset_service, require_roles
 from ..schemas.dataset import DatasetCreateRequest
 from ...application.dataset_service import DatasetService
+from ...domain.models.dataset import DatasetType
+from ...domain.models.platform import PlatformKey
+from ...domain.models.task import ScenarioType
 
 
-router = APIRouter(prefix="/datasets", tags=["datasets"])
+router = APIRouter(prefix="/datasets", tags=["datasets"], dependencies=[Depends(require_roles(*READ_ROLES))])
 
 
 @router.get("")
-def list_datasets(service: DatasetService = Depends(get_dataset_service)):
-    return {"datasets": [dataset.model_dump(mode="json") for dataset in service.list_datasets()]}
+def list_datasets(
+    source_platform: PlatformKey | None = None,
+    dataset_type: DatasetType | None = None,
+    scenario_type: ScenarioType | None = None,
+    tag: str = "",
+    q: str = "",
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    datasets, total = service.list_datasets_page(
+        source_platform=source_platform,
+        dataset_type=dataset_type,
+        scenario_type=scenario_type,
+        tag=tag,
+        query=q,
+        limit=limit,
+        offset=offset,
+    )
+    return {"datasets": [dataset.model_dump(mode="json") for dataset in datasets], "total": total}
 
 
 @router.get("/{dataset_id}")
@@ -23,7 +44,7 @@ def get_dataset(dataset_id: str, service: DatasetService = Depends(get_dataset_s
     return {"dataset": dataset.model_dump(mode="json")}
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_roles(*WORKFLOW_ROLES))])
 def create_dataset(
     payload: DatasetCreateRequest,
     service: DatasetService = Depends(get_dataset_service),
@@ -32,7 +53,7 @@ def create_dataset(
     return {"message": "Dataset created", "dataset": dataset.model_dump(mode="json")}
 
 
-@router.delete("/{dataset_id}")
+@router.delete("/{dataset_id}", dependencies=[Depends(require_roles(*WORKFLOW_ROLES))])
 def delete_dataset(
     dataset_id: str,
     delete_storage: bool = Query(False),

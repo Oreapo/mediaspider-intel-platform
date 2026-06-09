@@ -1,21 +1,51 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..dependencies import get_signal_service
+from ..dependencies import (
+    ANALYST_ROLES,
+    READ_ROLES,
+    get_case_service,
+    get_dataset_service,
+    get_signal_service,
+    get_task_service,
+    require_roles,
+)
 from ..schemas.signal import SignalCreateRequest, SignalExtractionRequest, SignalStatusUpdateRequest
+from ...application.case_service import CaseService
+from ...application.dataset_service import DatasetService
 from ...application.signal_service import SignalService
+from ...application.task_service import CollectionTaskService
+from ...domain.models.signal import RiskLevel, SignalStatus, SignalType
 
 
-router = APIRouter(prefix="/signals", tags=["signals"])
+router = APIRouter(prefix="/signals", tags=["signals"], dependencies=[Depends(require_roles(*READ_ROLES))])
 
 
 @router.get("")
-def list_signals(service: SignalService = Depends(get_signal_service)):
-    return {"signals": [signal.model_dump(mode="json") for signal in service.list_signals()]}
+def list_signals(
+    dataset_id: str | None = None,
+    status: SignalStatus | None = None,
+    risk_level: RiskLevel | None = None,
+    signal_type: SignalType | None = None,
+    q: str = "",
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: SignalService = Depends(get_signal_service),
+):
+    signals, total = service.list_signals_page(
+        dataset_id=dataset_id,
+        status=status,
+        risk_level=risk_level,
+        signal_type=signal_type,
+        query=q,
+        limit=limit,
+        offset=offset,
+    )
+    return {"signals": [signal.model_dump(mode="json") for signal in signals], "total": total}
 
 
-@router.post("/extract")
+@router.post("/extract", dependencies=[Depends(require_roles(*ANALYST_ROLES))])
 def extract_signals(
     payload: SignalExtractionRequest,
     service: SignalService = Depends(get_signal_service),
@@ -37,6 +67,49 @@ def extract_signals(
     }
 
 
+@router.get("/{signal_id}/detail")
+def get_signal_detail(
+    signal_id: str,
+    service: SignalService = Depends(get_signal_service),
+    dataset_service: DatasetService = Depends(get_dataset_service),
+    task_service: CollectionTaskService = Depends(get_task_service),
+    case_service: CaseService = Depends(get_case_service),
+):
+    signal = service.get_signal(signal_id)
+    if signal is None:
+        raise HTTPException(status_code=404, detail="Signal not found")
+
+    dataset = dataset_service.get_dataset(signal.dataset_id)
+    preview = _empty_preview()
+    if dataset is not None:
+        try:
+            preview = dataset_service.preview_dataset(dataset.id, limit=100)
+        except (FileNotFoundError, ValueError):
+            preview = _empty_preview()
+
+    source_task = None
+    source_run = None
+    if dataset is not None and dataset.source_task_id:
+        source_task = task_service.get_task(dataset.source_task_id)
+        source_run = _resolve_source_run(
+            task_service,
+            dataset.source_task_id,
+            signal.task_run_id,
+            dataset.source_run_id,
+        )
+
+    linked_case_details = _linked_case_details(signal.id, case_service)
+    return {
+        "signal": signal.model_dump(mode="json"),
+        "dataset": dataset.model_dump(mode="json") if dataset else None,
+        "preview": preview,
+        "source_task": source_task.model_dump(mode="json") if source_task else None,
+        "source_run": source_run.model_dump(mode="json") if source_run else None,
+        "linked_cases": [detail["case"] for detail in linked_case_details],
+        "linked_case_details": linked_case_details,
+    }
+
+
 @router.get("/{signal_id}")
 def get_signal(signal_id: str, service: SignalService = Depends(get_signal_service)):
     signal = service.get_signal(signal_id)
@@ -45,7 +118,7 @@ def get_signal(signal_id: str, service: SignalService = Depends(get_signal_servi
     return {"signal": signal.model_dump(mode="json")}
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_roles(*ANALYST_ROLES))])
 def create_signal(
     payload: SignalCreateRequest,
     service: SignalService = Depends(get_signal_service),
@@ -57,7 +130,7 @@ def create_signal(
     return {"message": "Signal created", "signal": signal.model_dump(mode="json")}
 
 
-@router.patch("/{signal_id}/status")
+@router.patch("/{signal_id}/status", dependencies=[Depends(require_roles(*ANALYST_ROLES))])
 def update_signal_status(
     signal_id: str,
     payload: SignalStatusUpdateRequest,
@@ -70,10 +143,38 @@ def update_signal_status(
     return {"message": "Signal status updated", "signal": signal.model_dump(mode="json")}
 
 
-@router.delete("/{signal_id}")
+@router.delete("/{signal_id}", dependencies=[Depends(require_roles(*ANALYST_ROLES))])
 def delete_signal(signal_id: str, service: SignalService = Depends(get_signal_service)):
     deleted = service.delete_signal(signal_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Signal not found")
     return {"message": "Signal deleted"}
+
+
+def _resolve_source_run(
+    task_service: CollectionTaskService,
+    task_id: str,
+    signal_run_id: str | None,
+    dataset_run_id: str | None,
+):
+    wanted_ids = {item for item in [signal_run_id, dataset_run_id] if item}
+    if not wanted_ids:
+        return None
+    return next((run for run in task_service.list_runs(task_id) if run.id in wanted_ids), None)
+
+
+def _empty_preview() -> dict[str, object]:
+    return {"columns": [], "rows": [], "mode": "table", "total": 0}
+
+
+def _linked_case_details(signal_id: str, case_service: CaseService) -> list[dict]:
+    details: list[dict] = []
+    for case in case_service.list_cases():
+        detail = case_service.get_case_detail(case.id)
+        if detail is None:
+            continue
+        if any(link.get("link_type") == "signal" and link.get("target_id") == signal_id for link in detail["links"]):
+            detail.setdefault("audit_events", [])
+            details.append(detail)
+    return details
 

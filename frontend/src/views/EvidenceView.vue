@@ -6,8 +6,18 @@ import {
   generateEvidencePacket,
   getEvidencePacket,
 } from '../api/evidence'
+import AppAlert from '../components/ui/AppAlert.vue'
+import BaseSection from '../components/ui/BaseSection.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FieldError from '../components/ui/FieldError.vue'
+import LoadingState from '../components/ui/LoadingState.vue'
+import PermissionGate from '../components/ui/PermissionGate.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useCases } from '../composables/useCases'
 import { useEvidencePackets } from '../composables/useEvidencePackets'
+import { useI18n } from '../composables/useI18n'
+import { requestConfirm } from '../lib/confirm'
+import { required, type ValidationErrors } from '../lib/validation'
 import type { EvidencePacket } from '../types'
 
 const {
@@ -17,6 +27,7 @@ const {
   fetchItems: fetchPackets,
 } = useEvidencePackets()
 const { items: caseItems } = useCases()
+const { t } = useI18n()
 
 const form = ref({
   case_id: '',
@@ -26,12 +37,13 @@ const selectedPacket = ref<EvidencePacket | null>(null)
 const busy = ref(false)
 const message = ref('')
 const error = ref('')
+const formErrors = ref<ValidationErrors>({})
 
 const packetStats = computed(() => [
-  { label: 'Packets', value: packetItems.value.length },
-  { label: 'Cases', value: new Set(packetItems.value.map((item) => item.case_id)).size },
-  { label: 'With Artifact', value: packetItems.value.filter((item) => item.storage_uri).length },
-  { label: 'Latest', value: packetItems.value[0]?.packet_name || '-' },
+  { label: t('evidence.statsPackets'), value: packetItems.value.length },
+  { label: t('evidence.statsCases'), value: new Set(packetItems.value.map((item) => item.case_id)).size },
+  { label: t('evidence.statsWithArtifact'), value: packetItems.value.filter((item) => item.storage_uri).length },
+  { label: t('evidence.statsLatest'), value: packetItems.value[0]?.packet_name || '-' },
 ])
 
 function manifestSummary(packet: EvidencePacket | null) {
@@ -44,16 +56,33 @@ function sourceRecords(packet: EvidencePacket | null) {
   return Array.isArray(records) ? (records as Array<Record<string, unknown>>) : []
 }
 
+function validatePacketForm() {
+  const errors: ValidationErrors = {}
+  const caseError = required(form.value.case_id, t('cases.case'))
+  const nameError = required(form.value.packet_name, t('cases.evidencePacketName'))
+
+  if (caseError) errors.case_id = caseError
+  if (nameError) errors.packet_name = nameError
+
+  formErrors.value = errors
+  return Object.keys(errors).length === 0
+}
+
 async function submitPacket() {
-  busy.value = true
   message.value = ''
   error.value = ''
+  if (!validatePacketForm()) {
+    error.value = t('evidence.fixFormErrors')
+    return
+  }
+
+  busy.value = true
   try {
     const packet = await generateEvidencePacket({
       case_id: form.value.case_id,
       packet_name: form.value.packet_name,
     })
-    message.value = 'Evidence packet generated.'
+    message.value = t('evidence.generatedMessage')
     form.value.packet_name = ''
     await fetchPackets()
     selectedPacket.value = packet
@@ -75,11 +104,18 @@ async function inspectPacket(packetId: string) {
 }
 
 async function removePacket(packetId: string) {
+  const confirmed = await requestConfirm({
+    title: t('evidence.deleteTitle'),
+    message: t('evidence.deleteMessage'),
+    confirmLabel: t('evidence.deleteConfirm'),
+  })
+  if (!confirmed) return
+
   message.value = ''
   error.value = ''
   try {
     await deleteEvidencePacket(packetId, true)
-    message.value = 'Evidence packet deleted.'
+    message.value = t('evidence.deletedMessage')
     if (selectedPacket.value?.id === packetId) selectedPacket.value = null
     await fetchPackets()
   } catch (err) {
@@ -97,108 +133,98 @@ async function removePacket(packetId: string) {
       </article>
     </div>
 
-    <div class="split-grid">
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Generate Packet</h2>
-            <p>从案件当前挂接对象生成证据 manifest，并写出可下载 JSON 产物。</p>
-          </div>
-        </div>
+    <div class="evidence-workspace">
+      <aside class="evidence-side-panel">
+        <BaseSection compact :title="t('evidence.generateTitle')" :description="t('evidence.generateDescription')">
+          <PermissionGate area="analysis">
+            <form class="evidence-form" @submit.prevent="submitPacket">
+              <label class="field">
+                <span>{{ t('cases.case') }}</span>
+                <select v-model="form.case_id" required>
+                  <option value="" disabled>{{ t('cases.chooseCase') }}</option>
+                  <option v-for="item in caseItems" :key="item.id" :value="item.id">
+                    {{ item.case_name }} · {{ t(`enum.${item.status}`) }} · {{ t(`enum.${item.priority}`) }}
+                  </option>
+                </select>
+                <FieldError :message="formErrors.case_id" />
+              </label>
 
-        <form class="evidence-form" @submit.prevent="submitPacket">
-          <label class="field">
-            <span>Case</span>
-            <select v-model="form.case_id" required>
-              <option value="" disabled>选择案件</option>
-              <option v-for="item in caseItems" :key="item.id" :value="item.id">
-                {{ item.case_name }} · {{ item.status }} · {{ item.priority }}
-              </option>
-            </select>
-          </label>
+              <label class="field">
+                <span>{{ t('cases.evidencePacketName') }}</span>
+                <input v-model="form.packet_name" required :placeholder="t('evidence.packetNamePlaceholder')" />
+                <FieldError :message="formErrors.packet_name" />
+              </label>
 
-          <label class="field">
-            <span>Packet Name</span>
-            <input v-model="form.packet_name" required placeholder="例：导流链路证据包 2026-04-28" />
-          </label>
-
-          <div class="actions">
-            <button class="primary-button" :disabled="busy" type="submit">
-              {{ busy ? 'Generating...' : 'Generate Evidence Packet' }}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Packet Registry</h2>
-            <p>已生成证据包会保留 metadata、manifest 和下载产物路径。</p>
-          </div>
-        </div>
-
-        <div v-if="packetsLoading" class="muted">Loading evidence packets...</div>
-        <div v-else-if="packetsError" class="error-text">{{ packetsError }}</div>
-        <div v-else class="packet-list">
-          <article v-for="item in packetItems" :key="item.id" class="packet-item">
-            <div class="packet-main">
-              <div>
-                <strong>{{ item.packet_name }}</strong>
-                <p>{{ item.case_id }} · {{ item.storage_uri }}</p>
+              <div class="actions">
+                <button class="primary-button" :disabled="busy" type="submit">
+                  {{ busy ? t('cases.generating') : t('cases.generateEvidence') }}
+                </button>
               </div>
-              <span class="packet-id">{{ item.id }}</span>
-            </div>
-            <div class="actions">
-              <button class="secondary-button" type="button" @click="inspectPacket(item.id)">Inspect</button>
-              <a class="secondary-button" :href="evidenceDownloadUrl(item.id)" target="_blank">Download</a>
-              <button class="secondary-button destructive" type="button" @click="removePacket(item.id)">Delete</button>
-            </div>
-          </article>
-          <div v-if="!packetItems.length" class="muted">No evidence packets yet.</div>
-        </div>
-      </section>
-    </div>
+            </form>
+          </PermissionGate>
+        </BaseSection>
 
-    <div v-if="message" class="success-text">{{ message }}</div>
-    <div v-if="error" class="error-text">{{ error }}</div>
+        <AppAlert v-if="message" tone="success" :title="t('tasks.successTitle')" :message="message" />
+        <AppAlert v-if="error" tone="error" :title="t('tasks.actionFailedTitle')" :message="error" />
+      </aside>
 
-    <section class="surface section-card">
-      <div class="section-head">
-        <div>
-          <h2>Manifest Detail</h2>
-          <p>{{ selectedPacket ? selectedPacket.id : '选择一个证据包查看 manifest 摘要。' }}</p>
-        </div>
-      </div>
-
-      <div v-if="selectedPacket" class="detail-grid">
-        <section class="detail-card">
-          <h3>{{ selectedPacket.packet_name }}</h3>
-          <p>{{ selectedPacket.storage_uri }}</p>
-          <div class="summary-grid">
-            <span>Datasets: {{ manifestSummary(selectedPacket).dataset_count ?? 0 }}</span>
-            <span>Signals: {{ manifestSummary(selectedPacket).signal_count ?? 0 }}</span>
-            <span>Entities: {{ manifestSummary(selectedPacket).entity_count ?? 0 }}</span>
-            <span>Notes: {{ manifestSummary(selectedPacket).note_count ?? 0 }}</span>
+      <main class="evidence-main-panel">
+        <BaseSection :title="t('evidence.listTitle')" :description="t('evidence.listDescription')">
+          <LoadingState v-if="packetsLoading" :title="t('evidence.loading')" />
+          <AppAlert v-else-if="packetsError" tone="error" :title="t('common.loadFailed')" :message="packetsError" />
+          <div v-else class="packet-list">
+            <article v-for="item in packetItems" :key="item.id" class="packet-item">
+              <div class="packet-main">
+                <div>
+                  <strong>{{ item.packet_name }}</strong>
+                  <p>{{ item.case_id }} · {{ item.storage_uri }}</p>
+                </div>
+                <StatusBadge :label="item.storage_uri ? t('evidence.downloadable') : t('evidence.notWritten')" :tone="item.storage_uri ? 'success' : 'warning'" />
+              </div>
+              <code class="packet-id">{{ item.id }}</code>
+              <div class="actions">
+                <button class="secondary-button" type="button" @click="inspectPacket(item.id)">{{ t('cases.view') }}</button>
+                <a class="secondary-button" :href="evidenceDownloadUrl(item.id)" target="_blank">{{ t('cases.download') }}</a>
+                <PermissionGate area="analysis" compact>
+                  <button class="secondary-button destructive" type="button" @click="removePacket(item.id)">{{ t('cases.delete') }}</button>
+                </PermissionGate>
+              </div>
+            </article>
+            <EmptyState v-if="!packetItems.length" :title="t('evidence.emptyTitle')" :description="t('evidence.emptyDescription')" />
           </div>
-        </section>
+        </BaseSection>
 
-        <section class="detail-section">
-          <h3>Source Records</h3>
-          <article v-for="(item, index) in sourceRecords(selectedPacket)" :key="index" class="compact-item">
-            <strong>{{ item.source_type }} · {{ item.dataset_id || item.signal_id }}</strong>
-            <span>{{ item.dataset_name || item.summary || '-' }}</span>
-          </article>
-          <div v-if="!sourceRecords(selectedPacket).length" class="muted">No source records.</div>
-        </section>
+        <BaseSection :title="t('evidence.detailTitle')" :description="selectedPacket ? selectedPacket.id : t('evidence.detailDescription')">
+          <div v-if="selectedPacket" class="detail-grid">
+            <section class="detail-card">
+              <h3>{{ selectedPacket.packet_name }}</h3>
+              <p>{{ selectedPacket.storage_uri }}</p>
+              <div class="summary-grid">
+                <span>{{ t('evidence.datasetCount', { count: Number(manifestSummary(selectedPacket).dataset_count ?? 0) }) }}</span>
+                <span>{{ t('evidence.signalCount', { count: Number(manifestSummary(selectedPacket).signal_count ?? 0) }) }}</span>
+                <span>{{ t('evidence.entityCount', { count: Number(manifestSummary(selectedPacket).entity_count ?? 0) }) }}</span>
+                <span>{{ t('evidence.noteCount', { count: Number(manifestSummary(selectedPacket).note_count ?? 0) }) }}</span>
+              </div>
+            </section>
 
-        <section class="detail-section manifest-json">
-          <h3>Manifest JSON</h3>
-          <pre>{{ JSON.stringify(selectedPacket.manifest_json, null, 2) }}</pre>
-        </section>
-      </div>
-      <div v-else class="muted">No packet selected.</div>
-    </section>
+            <section class="detail-section">
+              <h3>{{ t('evidence.sourceRecords') }}</h3>
+              <article v-for="(item, index) in sourceRecords(selectedPacket)" :key="index" class="compact-item">
+                <strong>{{ item.source_type }} · {{ item.dataset_id || item.signal_id }}</strong>
+                <span>{{ item.dataset_name || item.summary || '-' }}</span>
+              </article>
+              <EmptyState v-if="!sourceRecords(selectedPacket).length" :title="t('evidence.noSourceRecords')" />
+            </section>
+
+            <section class="detail-section manifest-json">
+              <h3>Manifest JSON</h3>
+              <pre>{{ JSON.stringify(selectedPacket.manifest_json, null, 2) }}</pre>
+            </section>
+          </div>
+          <EmptyState v-else :title="t('evidence.noSelectionTitle')" :description="t('evidence.noSelectionDescription')" />
+        </BaseSection>
+      </main>
+    </div>
   </section>
 </template>
 
@@ -222,6 +248,40 @@ async function removePacket(packetId: string) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
+}
+
+.evidence-workspace {
+  display: grid;
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.evidence-side-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 104px);
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.evidence-main-panel {
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.evidence-side-panel .actions {
+  display: grid;
+}
+
+.evidence-side-panel .primary-button,
+.evidence-side-panel .secondary-button {
+  width: 100%;
 }
 
 .section-card,
@@ -378,6 +438,17 @@ pre {
 @media (max-width: 980px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .evidence-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .evidence-side-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .split-grid,

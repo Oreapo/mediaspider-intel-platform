@@ -1,17 +1,20 @@
 import { onMounted, ref } from 'vue'
-import { listCases } from '../api/cases'
+import { listCasesPage, type CaseListFilters } from '../api/cases'
 import type { CaseRecord } from '../types'
 
 export function useCases() {
   const items = ref<CaseRecord[]>([])
+  const total = ref(0)
   const isLoading = ref(false)
   const error = ref('')
 
-  async function fetchItems() {
+  async function fetchItems(filters?: CaseListFilters) {
     isLoading.value = true
     error.value = ''
     try {
-      items.value = await listCases()
+      const result = await listCasesPage(filters)
+      items.value = result.cases
+      total.value = result.total
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -21,5 +24,5 @@ export function useCases() {
 
   onMounted(fetchItems)
 
-  return { items, isLoading, error, fetchItems }
+  return { items, total, isLoading, error, fetchItems }
 }

@@ -1,16 +1,30 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { createSignal, deleteSignal, extractSignals, updateSignalStatus } from '../api/signals'
+import AppAlert from '../components/ui/AppAlert.vue'
+import BaseSection from '../components/ui/BaseSection.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FieldError from '../components/ui/FieldError.vue'
+import LoadingState from '../components/ui/LoadingState.vue'
+import PaginationBar from '../components/ui/PaginationBar.vue'
+import PermissionGate from '../components/ui/PermissionGate.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useDatasets } from '../composables/useDatasets'
+import { useI18n } from '../composables/useI18n'
 import { useSignals } from '../composables/useSignals'
+import { requestConfirm } from '../lib/confirm'
+import { lastPageOffset } from '../lib/pagination'
+import { nonNegativeNumber, required, type ValidationErrors } from '../lib/validation'
 
 const {
   items: signalItems,
+  total: signalTotal,
   isLoading: signalsLoading,
   error: signalsError,
   fetchItems: fetchSignals,
 } = useSignals()
 const { items: datasetItems } = useDatasets()
+const { t } = useI18n()
 
 const extractionForm = ref({
   dataset_id: '',
@@ -25,10 +39,21 @@ const manualForm = ref({
   risk_score: 50,
   summary: '',
 })
+const filters = ref({
+  q: '',
+  dataset_id: '',
+  status: '',
+  risk_level: '',
+  signal_type: '',
+  limit: 100,
+  offset: 0,
+})
 const selectedSignalId = ref('')
 const message = ref('')
 const error = ref('')
 const busy = ref(false)
+const extractionErrors = ref<ValidationErrors>({})
+const manualErrors = ref<ValidationErrors>({})
 
 const selectedSignal = computed(() =>
   signalItems.value.find((item) => item.id === selectedSignalId.value),
@@ -36,13 +61,17 @@ const selectedSignal = computed(() =>
 
 const signalStats = computed(() => {
   const stats = [
-    { label: 'New', value: signalItems.value.filter((item) => item.status === 'new').length },
-    { label: 'Reviewing', value: signalItems.value.filter((item) => item.status === 'reviewing').length },
-    { label: 'Confirmed', value: signalItems.value.filter((item) => item.status === 'confirmed').length },
-    { label: 'High+', value: signalItems.value.filter((item) => ['high', 'critical'].includes(item.risk_level)).length },
+    { label: t('enum.new'), value: signalItems.value.filter((item) => item.status === 'new').length },
+    { label: t('enum.reviewing'), value: signalItems.value.filter((item) => item.status === 'reviewing').length },
+    { label: t('enum.confirmed'), value: signalItems.value.filter((item) => item.status === 'confirmed').length },
+    { label: t('signals.highRiskPlus'), value: signalItems.value.filter((item) => ['high', 'critical'].includes(item.risk_level)).length },
   ]
   return stats
 })
+
+const signalTypes = computed(() =>
+  Array.from(new Set(signalItems.value.map((item) => item.signal_type))).sort(),
+)
 
 function parseList(text: string) {
   return text
@@ -56,18 +85,94 @@ function sourceRef(signal: { payload_json: Record<string, unknown> }) {
   return ref && typeof ref === 'object' ? (ref as Record<string, unknown>) : {}
 }
 
+function validateExtractionForm() {
+  const errors: ValidationErrors = {}
+  const datasetError = required(extractionForm.value.dataset_id, t('signals.dataset'))
+  const limitError = nonNegativeNumber(extractionForm.value.limit - 1, t('signals.limit'))
+
+  if (datasetError) errors.dataset_id = datasetError
+  if (!parseList(extractionForm.value.extractors).length) errors.extractors = t('signals.extractorRequired')
+  if (limitError) errors.limit = t('signals.limitInvalid')
+
+  extractionErrors.value = errors
+  return Object.keys(errors).length === 0
+}
+
+function validateManualForm() {
+  const errors: ValidationErrors = {}
+  const datasetError = required(manualForm.value.dataset_id, t('signals.dataset'))
+  const summaryError = required(manualForm.value.summary, t('signals.summary'))
+  const scoreValid = Number.isFinite(manualForm.value.risk_score)
+    && manualForm.value.risk_score >= 0
+    && manualForm.value.risk_score <= 100
+
+  if (datasetError) errors.dataset_id = datasetError
+  if (summaryError) errors.summary = summaryError
+  if (!scoreValid) errors.risk_score = t('signals.scoreInvalid')
+
+  manualErrors.value = errors
+  return Object.keys(errors).length === 0
+}
+
+async function applyFilters() {
+  selectedSignalId.value = ''
+  filters.value.offset = 0
+  await fetchSignalPage()
+}
+
+async function fetchSignalPage() {
+  await fetchSignals({
+    q: filters.value.q,
+    dataset_id: filters.value.dataset_id,
+    status: filters.value.status,
+    risk_level: filters.value.risk_level,
+    signal_type: filters.value.signal_type,
+    limit: filters.value.limit,
+    offset: filters.value.offset,
+  })
+  const normalizedOffset = lastPageOffset(signalTotal.value, filters.value.limit)
+  if (filters.value.offset > normalizedOffset) {
+    filters.value.offset = normalizedOffset
+    if (signalTotal.value > 0) await fetchSignalPage()
+  }
+}
+
+async function changeSignalPage(offset: number) {
+  selectedSignalId.value = ''
+  filters.value.offset = offset
+  await fetchSignalPage()
+}
+
+async function clearFilters() {
+  filters.value = {
+    q: '',
+    dataset_id: '',
+    status: '',
+    risk_level: '',
+    signal_type: '',
+    limit: 100,
+    offset: 0,
+  }
+  await applyFilters()
+}
+
 async function submitExtraction() {
-  busy.value = true
   message.value = ''
   error.value = ''
+  if (!validateExtractionForm()) {
+    error.value = t('signals.fixExtractionErrors')
+    return
+  }
+
+  busy.value = true
   try {
     const signals = await extractSignals({
       dataset_id: extractionForm.value.dataset_id,
       extractors: parseList(extractionForm.value.extractors),
       limit: extractionForm.value.limit,
     })
-    message.value = `Extracted ${signals.length} signals.`
-    await fetchSignals()
+    message.value = t('signals.extractedMessage', { count: signals.length })
+    await fetchSignalPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -76,9 +181,14 @@ async function submitExtraction() {
 }
 
 async function submitManualSignal() {
-  busy.value = true
   message.value = ''
   error.value = ''
+  if (!validateManualForm()) {
+    error.value = t('signals.fixManualErrors')
+    return
+  }
+
+  busy.value = true
   try {
     await createSignal({
       dataset_id: manualForm.value.dataset_id,
@@ -94,9 +204,9 @@ async function submitManualSignal() {
         },
       },
     })
-    message.value = 'Signal created.'
+    message.value = t('signals.createdMessage')
     manualForm.value.summary = ''
-    await fetchSignals()
+    await fetchSignalPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -109,24 +219,59 @@ async function setStatus(signalId: string, status: string) {
   error.value = ''
   try {
     await updateSignalStatus(signalId, status)
-    message.value = `Signal marked as ${status}.`
-    await fetchSignals()
+    message.value = t('signals.statusUpdated', { status: labelValue(status) })
+    await fetchSignalPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
 }
 
 async function removeSignal(signalId: string) {
+  const confirmed = await requestConfirm({
+    title: t('signals.deleteTitle'),
+    message: t('signals.deleteMessage'),
+    confirmLabel: t('signals.deleteConfirm'),
+  })
+  if (!confirmed) return
+
   message.value = ''
   error.value = ''
   try {
     await deleteSignal(signalId)
-    message.value = 'Signal deleted.'
+    message.value = t('signals.deletedMessage')
     if (selectedSignalId.value === signalId) selectedSignalId.value = ''
-    await fetchSignals()
+    await fetchSignalPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
+}
+
+function riskTone(level: string) {
+  if (['critical', 'high'].includes(level)) return 'danger'
+  if (level === 'medium') return 'warning'
+  if (level === 'low') return 'success'
+  return 'neutral'
+}
+
+function statusTone(status: string) {
+  if (status === 'confirmed') return 'success'
+  if (status === 'reviewing') return 'info'
+  if (status === 'dismissed') return 'neutral'
+  if (status === 'new') return 'warning'
+  return 'neutral'
+}
+
+function labelValue(value: string) {
+  const key = `enum.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
+}
+
+function datasetScenarioLabel(value?: string | null) {
+  if (!value) return '-'
+  const key = `scenario.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
 }
 </script>
 
@@ -139,166 +284,225 @@ async function removeSignal(signalId: string) {
       </article>
     </div>
 
-    <div class="split-grid">
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Extract From Dataset</h2>
-            <p>从数据集预览行中执行规则提取，并保留 dataset、row 和原始引用。</p>
-          </div>
-        </div>
-
+    <div class="signal-workspace">
+      <aside class="signal-side-panel">
+    <div class="signal-action-stack">
+      <BaseSection compact :title="t('signals.extractTitle')" :description="t('signals.extractDescription')">
+        <PermissionGate area="analysis">
         <form class="signal-form" @submit.prevent="submitExtraction">
           <label class="field">
-            <span>Dataset</span>
+            <span>{{ t('signals.dataset') }}</span>
             <select v-model="extractionForm.dataset_id" required>
-              <option value="" disabled>选择一个数据集</option>
+              <option value="" disabled>{{ t('signals.chooseDataset') }}</option>
               <option v-for="item in datasetItems" :key="item.id" :value="item.id">
-                {{ item.dataset_name }} · {{ item.source_platform }} · {{ item.scenario_type || '-' }}
+                {{ item.dataset_name }} · {{ item.source_platform }} · {{ datasetScenarioLabel(item.scenario_type) }}
               </option>
             </select>
+            <FieldError :message="extractionErrors.dataset_id" />
           </label>
 
           <div class="grid-two">
             <label class="field">
-              <span>Extractors</span>
+              <span>{{ t('signals.extractors') }}</span>
               <input
                 v-model="extractionForm.extractors"
                 placeholder="risk_terms,contact_points,template_similarity,xhs_comment_lead_diversion"
               />
+              <FieldError :message="extractionErrors.extractors" />
             </label>
             <label class="field">
-              <span>Limit</span>
+              <span>{{ t('signals.limit') }}</span>
               <input v-model.number="extractionForm.limit" min="1" max="200" step="1" type="number" />
+              <FieldError :message="extractionErrors.limit" />
             </label>
           </div>
 
           <div class="actions">
             <button class="primary-button" :disabled="busy" type="submit">
-              {{ busy ? 'Working...' : 'Extract Signals' }}
+              {{ busy ? t('signals.processing') : t('signals.extract') }}
             </button>
           </div>
         </form>
-      </section>
+        </PermissionGate>
+      </BaseSection>
 
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Create Manual Signal</h2>
-            <p>支持分析师把人工发现的风险线索纳入同一条复核流。</p>
-          </div>
-        </div>
-
+      <BaseSection compact :title="t('signals.manualTitle')" :description="t('signals.manualDescription')">
+        <PermissionGate area="analysis">
         <form class="signal-form" @submit.prevent="submitManualSignal">
           <label class="field">
-            <span>Dataset</span>
+            <span>{{ t('signals.dataset') }}</span>
             <select v-model="manualForm.dataset_id" required>
-              <option value="" disabled>选择一个数据集</option>
+              <option value="" disabled>{{ t('signals.chooseDataset') }}</option>
               <option v-for="item in datasetItems" :key="item.id" :value="item.id">
                 {{ item.dataset_name }} · {{ item.source_platform }}
               </option>
             </select>
+            <FieldError :message="manualErrors.dataset_id" />
           </label>
 
           <div class="grid-two">
             <label class="field">
-              <span>Risk Level</span>
+              <span>{{ t('signals.riskLevel') }}</span>
               <select v-model="manualForm.risk_level">
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="critical">critical</option>
+                <option value="low">{{ t('enum.low') }}</option>
+                <option value="medium">{{ t('enum.medium') }}</option>
+                <option value="high">{{ t('enum.high') }}</option>
+                <option value="critical">{{ t('enum.critical') }}</option>
               </select>
             </label>
             <label class="field">
-              <span>Risk Score</span>
+              <span>{{ t('signals.riskScore') }}</span>
               <input v-model.number="manualForm.risk_score" min="0" max="100" step="1" type="number" />
+              <FieldError :message="manualErrors.risk_score" />
             </label>
           </div>
 
           <label class="field">
-            <span>Summary</span>
-            <textarea v-model="manualForm.summary" required rows="3" placeholder="说明风险依据和可追溯来源" />
+            <span>{{ t('signals.summary') }}</span>
+            <textarea v-model="manualForm.summary" required rows="3" :placeholder="t('signals.summaryPlaceholder')" />
+            <FieldError :message="manualErrors.summary" />
           </label>
 
           <div class="actions">
-            <button class="secondary-button" :disabled="busy" type="submit">Create Manual Signal</button>
+            <button class="secondary-button" :disabled="busy" type="submit">{{ t('signals.createManual') }}</button>
           </div>
         </form>
-      </section>
+        </PermissionGate>
+      </BaseSection>
     </div>
 
-    <div v-if="message" class="success-text">{{ message }}</div>
-    <div v-if="error" class="error-text">{{ error }}</div>
+    <AppAlert v-if="message" tone="success" :title="t('tasks.successTitle')" :message="message" />
+    <AppAlert v-if="error" tone="error" :title="t('tasks.actionFailedTitle')" :message="error" />
+      </aside>
+
+      <main class="signal-main-panel">
+    <BaseSection :title="t('signals.filterTitle')" :description="t('signals.filterDescription')">
+      <form class="filter-form" @submit.prevent="applyFilters">
+        <label class="field">
+          <span>{{ t('tasks.search') }}</span>
+          <input v-model="filters.q" :placeholder="t('signals.searchPlaceholder')" />
+        </label>
+
+        <label class="field">
+          <span>{{ t('signals.dataset') }}</span>
+          <select v-model="filters.dataset_id">
+            <option value="">{{ t('signals.allDatasets') }}</option>
+            <option v-for="item in datasetItems" :key="item.id" :value="item.id">
+              {{ item.dataset_name }} · {{ item.source_platform }}
+            </option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>{{ t('tasks.status') }}</span>
+          <select v-model="filters.status">
+            <option value="">{{ t('signals.allStatuses') }}</option>
+            <option value="new">{{ t('enum.new') }}</option>
+            <option value="reviewing">{{ t('enum.reviewing') }}</option>
+            <option value="confirmed">{{ t('enum.confirmed') }}</option>
+            <option value="dismissed">{{ t('enum.dismissed') }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>{{ t('signals.risk') }}</span>
+          <select v-model="filters.risk_level">
+            <option value="">{{ t('signals.allRisks') }}</option>
+            <option value="critical">{{ t('enum.critical') }}</option>
+            <option value="high">{{ t('enum.high') }}</option>
+            <option value="medium">{{ t('enum.medium') }}</option>
+            <option value="low">{{ t('enum.low') }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>{{ t('signals.type') }}</span>
+          <select v-model="filters.signal_type">
+            <option value="">{{ t('signals.allTypes') }}</option>
+            <option v-for="item in signalTypes" :key="item" :value="item">{{ item }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>{{ t('signals.limit') }}</span>
+          <input v-model.number="filters.limit" min="1" max="500" step="1" type="number" />
+        </label>
+
+        <div class="actions filter-actions">
+          <button class="primary-button" :disabled="signalsLoading" type="submit">{{ t('tasks.apply') }}</button>
+          <button class="secondary-button" :disabled="signalsLoading" type="button" @click="clearFilters">{{ t('tasks.clear') }}</button>
+        </div>
+      </form>
+    </BaseSection>
 
     <div class="split-grid">
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Signal Queue</h2>
-            <p>优先处理 high / critical 风险等级和 new 状态。</p>
-          </div>
-        </div>
-
-        <div v-if="signalsLoading" class="muted">Loading signals...</div>
-        <div v-else-if="signalsError" class="error-text">{{ signalsError }}</div>
+      <BaseSection :title="t('signals.queueTitle')" :description="t('signals.queueDescription')">
+        <LoadingState v-if="signalsLoading" :title="t('signals.loading')" />
+        <AppAlert v-else-if="signalsError" tone="error" :title="t('common.loadFailed')" :message="signalsError" />
         <div v-else class="signal-list">
           <article v-for="item in signalItems" :key="item.id" class="signal-item">
             <div class="signal-main">
               <div>
                 <strong>{{ item.summary }}</strong>
-                <p>{{ item.signal_type }} · {{ item.signal_source }} · score {{ item.risk_score }}</p>
+                <p>{{ item.signal_type }} · {{ item.signal_source }} · {{ t('signals.score', { score: item.risk_score }) }}</p>
               </div>
               <div class="badge-stack">
-                <span class="risk-badge" :class="item.risk_level">{{ item.risk_level }}</span>
-                <span class="status-badge">{{ item.status }}</span>
+                <StatusBadge :label="labelValue(item.risk_level)" :tone="riskTone(item.risk_level)" />
+                <StatusBadge :label="labelValue(item.status)" :tone="statusTone(item.status)" />
               </div>
             </div>
             <div class="signal-meta">
               <span>{{ item.dataset_id }}</span>
-              <span>row {{ sourceRef(item).row_index ?? '-' }}</span>
+              <span>{{ t('signals.row', { row: String(sourceRef(item).row_index ?? '-') }) }}</span>
             </div>
             <div class="actions">
-              <button class="secondary-button" type="button" @click="selectedSignalId = item.id">Inspect</button>
-              <button class="secondary-button" type="button" @click="setStatus(item.id, 'reviewing')">Review</button>
-              <button class="secondary-button" type="button" @click="setStatus(item.id, 'confirmed')">Confirm</button>
-              <button class="secondary-button" type="button" @click="setStatus(item.id, 'dismissed')">Dismiss</button>
-              <button class="secondary-button destructive" type="button" @click="removeSignal(item.id)">Delete</button>
+              <RouterLink class="secondary-button link-button" :to="{ name: 'signal-detail', params: { signalId: item.id } }">
+                {{ t('signals.viewDetail') }}
+              </RouterLink>
+              <button class="secondary-button" type="button" @click="selectedSignalId = item.id">{{ t('signals.view') }}</button>
+              <PermissionGate area="analysis" compact>
+              <button class="secondary-button" type="button" @click="setStatus(item.id, 'reviewing')">{{ t('signals.review') }}</button>
+              <button class="secondary-button" type="button" @click="setStatus(item.id, 'confirmed')">{{ t('signals.confirm') }}</button>
+              <button class="secondary-button" type="button" @click="setStatus(item.id, 'dismissed')">{{ t('signals.dismiss') }}</button>
+              <button class="secondary-button destructive" type="button" @click="removeSignal(item.id)">{{ t('signals.delete') }}</button>
+              </PermissionGate>
             </div>
           </article>
-          <div v-if="!signalItems.length" class="muted">No signals yet.</div>
+          <EmptyState v-if="!signalItems.length" :title="t('signals.emptyTitle')" :description="t('signals.emptyDescription')" />
+          <PaginationBar
+            :total="signalTotal"
+            :limit="filters.limit"
+            :offset="filters.offset"
+            :loading="signalsLoading"
+            @change="changeSignalPage"
+          />
         </div>
-      </section>
+      </BaseSection>
 
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Traceability</h2>
-            <p>{{ selectedSignal ? selectedSignal.id : '选择一个信号查看来源引用。' }}</p>
-          </div>
-        </div>
-
+      <BaseSection :title="t('signals.traceTitle')" :description="selectedSignal ? selectedSignal.id : t('signals.traceDescription')">
         <div v-if="selectedSignal" class="trace-card">
           <div class="trace-row">
-            <span>Dataset</span>
+            <span>{{ t('signals.dataset') }}</span>
             <strong>{{ selectedSignal.dataset_id }}</strong>
           </div>
           <div class="trace-row">
-            <span>Row</span>
+            <span>{{ t('signals.rowNumber') }}</span>
             <strong>{{ sourceRef(selectedSignal).row_index ?? '-' }}</strong>
           </div>
           <div class="trace-row">
-            <span>Source Entity</span>
+            <span>{{ t('signals.sourceEntity') }}</span>
             <strong>{{ sourceRef(selectedSignal).source_entity_id || '-' }}</strong>
           </div>
           <div class="trace-row">
-            <span>Raw Ref</span>
+            <span>{{ t('signals.rawRef') }}</span>
             <strong>{{ sourceRef(selectedSignal).raw_ref || '-' }}</strong>
           </div>
           <pre>{{ JSON.stringify(selectedSignal.payload_json, null, 2) }}</pre>
         </div>
-        <div v-else class="muted">No signal selected.</div>
-      </section>
+        <EmptyState v-else :title="t('signals.noSelectionTitle')" :description="t('signals.noSelectionDescription')" />
+      </BaseSection>
+    </div>
+      </main>
     </div>
   </section>
 </template>
@@ -306,7 +510,8 @@ async function removeSignal(signalId: string) {
 <style scoped>
 .page-grid,
 .signal-form,
-.signal-list {
+.signal-list,
+.filter-form {
   display: grid;
   gap: 18px;
 }
@@ -315,6 +520,47 @@ async function removeSignal(signalId: string) {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+}
+
+.signal-workspace {
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.signal-side-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 104px);
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.signal-main-panel {
+  min-width: 0;
+}
+
+.signal-action-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.signal-side-panel .grid-two {
+  grid-template-columns: 1fr;
+}
+
+.signal-side-panel .actions {
+  display: grid;
+}
+
+.signal-side-panel .primary-button,
+.signal-side-panel .secondary-button {
+  width: 100%;
 }
 
 .split-grid {
@@ -357,6 +603,11 @@ async function removeSignal(signalId: string) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.filter-form {
+  grid-template-columns: 1.4fr repeat(5, minmax(0, 1fr)) auto;
+  align-items: end;
 }
 
 .field {
@@ -457,6 +708,10 @@ async function removeSignal(signalId: string) {
   align-items: center;
 }
 
+.filter-actions {
+  flex-wrap: nowrap;
+}
+
 .primary-button,
 .secondary-button {
   border: none;
@@ -474,6 +729,12 @@ async function removeSignal(signalId: string) {
 .secondary-button {
   background: rgba(226, 232, 240, 0.9);
   color: #1e293b;
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 .secondary-button.destructive {
@@ -516,9 +777,21 @@ pre {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .signal-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .signal-side-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
   .split-grid,
   .grid-two,
-  .trace-row {
+  .trace-row,
+  .filter-form {
     grid-template-columns: 1fr;
   }
 }

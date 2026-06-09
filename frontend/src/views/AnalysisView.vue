@@ -1,10 +1,20 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { createAnalysisJob, getAnalysisOutputs } from '../api/analysis'
+import AppAlert from '../components/ui/AppAlert.vue'
+import BaseSection from '../components/ui/BaseSection.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FieldError from '../components/ui/FieldError.vue'
+import LoadingState from '../components/ui/LoadingState.vue'
+import PermissionGate from '../components/ui/PermissionGate.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useAnalysisJobs } from '../composables/useAnalysisJobs'
 import { useDatasets } from '../composables/useDatasets'
+import { useI18n } from '../composables/useI18n'
+import { parseJsonObject, required, type ValidationErrors } from '../lib/validation'
 import type { AnalysisOutput } from '../types'
 
+const { t } = useI18n()
 const {
   items: jobItems,
   isLoading: jobsLoading,
@@ -24,24 +34,51 @@ const selectedJobId = ref('')
 const creating = ref(false)
 const message = ref('')
 const error = ref('')
+const fieldErrors = ref<ValidationErrors>({})
 
 const selectedJob = computed(() => jobItems.value.find((item) => item.id === selectedJobId.value))
+const analysisStats = computed(() => [
+  { label: t('analysis.jobsTitle'), value: jobItems.value.length },
+  { label: t('enum.succeeded'), value: jobItems.value.filter((item) => item.status === 'succeeded').length },
+  { label: t('enum.running'), value: jobItems.value.filter((item) => item.status === 'running').length },
+  { label: t('analysis.outputsTitle'), value: outputs.value.length },
+])
+
+function validateAnalysisForm() {
+  const errors: ValidationErrors = {}
+  const datasetError = required(form.value.dataset_id, t('analysis.dataset'))
+  const typeError = required(form.value.analysis_type, t('analysis.type'))
+  const parameters = parseJsonObject(form.value.parameters_json, t('analysis.parametersJson'))
+
+  if (datasetError) errors.dataset_id = datasetError
+  if (typeError) errors.analysis_type = typeError
+  if (parameters.error) errors.parameters_json = parameters.error
+
+  fieldErrors.value = errors
+  return {
+    isValid: Object.keys(errors).length === 0,
+    parameters: parameters.value || {},
+  }
+}
 
 async function submitAnalysisJob() {
-  creating.value = true
   message.value = ''
   error.value = ''
+  const validation = validateAnalysisForm()
+  if (!validation.isValid) {
+    error.value = t('analysis.fixFormErrors')
+    return
+  }
+
+  creating.value = true
   try {
-    const parameters = form.value.parameters_json.trim()
-      ? JSON.parse(form.value.parameters_json)
-      : {}
     const job = await createAnalysisJob({
       dataset_id: form.value.dataset_id,
       analysis_scope: form.value.analysis_scope,
       analysis_type: form.value.analysis_type,
-      parameters_json: parameters,
+      parameters_json: validation.parameters,
     })
-    message.value = 'Analysis job created.'
+    message.value = t('analysis.createdMessage')
     selectedJobId.value = job.id
     await fetchJobs()
     outputs.value = await getAnalysisOutputs(job.id)
@@ -75,123 +112,141 @@ function topTerms(output: AnalysisOutput) {
     ? (output.payload_json.top_terms as Array<Record<string, unknown>>)
     : []
 }
+
+function jobTone(status: string) {
+  if (status === 'succeeded' || status === 'completed') return 'success'
+  if (status === 'running') return 'info'
+  if (status === 'failed') return 'danger'
+  return 'neutral'
+}
+
+function labelValue(value: string) {
+  const key = `enum.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
+}
+
+function scopeLabel(value: string) {
+  const key = `analysisScope.${value}`
+  const translated = t(key)
+  return translated === key ? value : translated
+}
 </script>
 
 <template>
   <section class="page-grid">
-    <section class="surface section-card">
-      <div class="section-head">
-        <div>
-          <h2>Create Analysis Job</h2>
-          <p>先做通用分析入口。后续在这里继续扩展平台专属分析与跨平台分析。</p>
-        </div>
-      </div>
+    <div class="stats-grid">
+      <article v-for="stat in analysisStats" :key="stat.label" class="surface stat-card">
+        <span>{{ stat.label }}</span>
+        <strong>{{ stat.value }}</strong>
+      </article>
+    </div>
 
-      <form class="analysis-form" @submit.prevent="submitAnalysisJob">
-        <div class="grid-two">
-          <label class="field">
-            <span>Dataset</span>
-            <select v-model="form.dataset_id" required>
-              <option value="" disabled>选择一个数据集</option>
-              <option v-for="item in datasetItems" :key="item.id" :value="item.id">
-                {{ item.dataset_name }} · {{ item.source_platform }}
-              </option>
-            </select>
-          </label>
+    <div class="analysis-workspace">
+      <aside class="analysis-side-panel">
+        <BaseSection compact :title="t('analysis.createTitle')" :description="t('analysis.createDescription')">
+          <PermissionGate area="analysis">
+            <form class="analysis-form" @submit.prevent="submitAnalysisJob">
+              <div class="grid-two">
+                <label class="field">
+                  <span>{{ t('analysis.dataset') }}</span>
+                  <select v-model="form.dataset_id" required>
+                    <option value="" disabled>{{ t('analysis.selectDataset') }}</option>
+                    <option v-for="item in datasetItems" :key="item.id" :value="item.id">
+                      {{ item.dataset_name }} · {{ item.source_platform }}
+                    </option>
+                  </select>
+                  <FieldError :message="fieldErrors.dataset_id" />
+                </label>
 
-          <label class="field">
-            <span>Analysis Scope</span>
-            <select v-model="form.analysis_scope">
-              <option value="common">common</option>
-              <option value="platform">platform</option>
-              <option value="cross_platform">cross_platform</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="grid-two">
-          <label class="field">
-            <span>Analysis Type</span>
-            <input v-model="form.analysis_type" required placeholder="summary / topic_map / seller_profile" />
-          </label>
-
-          <label class="field">
-            <span>Parameters JSON</span>
-            <input v-model="form.parameters_json" placeholder='{"window":"last_30_days"}' />
-          </label>
-        </div>
-
-        <div class="actions">
-          <button class="primary-button" :disabled="creating" type="submit">
-            {{ creating ? 'Creating...' : 'Create Analysis Job' }}
-          </button>
-          <span v-if="message" class="success-text">{{ message }}</span>
-          <span v-if="error" class="error-text">{{ error }}</span>
-        </div>
-      </form>
-    </section>
-
-    <div class="split-grid">
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Analysis Jobs</h2>
-            <p>最小闭环先聚焦 dataset -> analysis job -> outputs。</p>
-          </div>
-        </div>
-
-        <div v-if="jobsLoading" class="muted">Loading analysis jobs...</div>
-        <div v-else-if="jobsError" class="error-text">{{ jobsError }}</div>
-        <div v-else class="job-list">
-          <article v-for="item in jobItems" :key="item.id" class="job-item">
-            <div class="job-main">
-              <div>
-                <strong>{{ item.analysis_type }}</strong>
-                <p>{{ item.analysis_scope }} · {{ item.status }} · {{ item.dataset_id }}</p>
+                <label class="field">
+                  <span>{{ t('analysis.scope') }}</span>
+                  <select v-model="form.analysis_scope">
+                    <option value="common">{{ t('analysisScope.common') }}</option>
+                    <option value="platform">{{ t('analysisScope.platform') }}</option>
+                    <option value="cross_platform">{{ t('analysisScope.cross_platform') }}</option>
+                  </select>
+                </label>
               </div>
-              <span class="job-id">{{ item.id }}</span>
-            </div>
-            <div class="job-meta">
-              <span>Started: {{ item.started_at || '-' }}</span>
-              <span>Finished: {{ item.finished_at || '-' }}</span>
-            </div>
-            <div class="actions">
-              <button class="secondary-button" type="button" @click="openOutputs(item.id)">View Outputs</button>
-            </div>
-          </article>
-          <div v-if="!jobItems.length" class="muted">No analysis jobs yet.</div>
-        </div>
-      </section>
 
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>Analysis Outputs</h2>
-            <p>{{ selectedJob ? `${selectedJob.analysis_type} · ${selectedJob.dataset_id}` : '选择一个分析任务查看输出。' }}</p>
-          </div>
-        </div>
+              <div class="grid-two">
+                <label class="field">
+                  <span>{{ t('analysis.type') }}</span>
+                  <input v-model="form.analysis_type" required placeholder="summary / topic_map / seller_profile" />
+                  <FieldError :message="fieldErrors.analysis_type" />
+                </label>
 
-        <div v-if="outputs.length" class="output-list">
-          <article v-for="output in outputs" :key="output.id" class="output-card">
-            <strong>{{ output.title }}</strong>
-            <p class="output-summary">{{ output.summary }}</p>
-
-            <div class="summary-grid">
-              <div v-for="(card, index) in summaryCards(output)" :key="index" class="summary-card">
-                <span>{{ card.label }}</span>
-                <strong>{{ card.value }}</strong>
+                <label class="field">
+                  <span>{{ t('analysis.parametersJson') }}</span>
+                  <input v-model="form.parameters_json" placeholder='{"window":"last_30_days"}' />
+                  <FieldError :message="fieldErrors.parameters_json" />
+                </label>
               </div>
-            </div>
 
-            <div class="term-list">
-              <span v-for="(term, index) in topTerms(output)" :key="index" class="term-chip">
-                {{ term.term }} · {{ term.count }}
-              </span>
+              <div class="actions">
+                <button class="primary-button" :disabled="creating" type="submit">
+                  {{ creating ? t('analysis.creating') : t('analysis.create') }}
+                </button>
+              </div>
+            </form>
+          </PermissionGate>
+        </BaseSection>
+
+        <AppAlert v-if="message" tone="success" :title="t('analysis.operationSuccess')" :message="message" />
+        <AppAlert v-if="error" tone="error" :title="t('analysis.operationFailed')" :message="error" />
+      </aside>
+
+      <main class="analysis-main-panel">
+        <div class="split-grid">
+          <BaseSection :title="t('analysis.jobsTitle')" :description="t('analysis.jobsDescription')">
+            <LoadingState v-if="jobsLoading" :title="t('analysis.loadingJobs')" />
+            <AppAlert v-else-if="jobsError" tone="error" :title="t('common.loadFailed')" :message="jobsError" />
+            <div v-else class="job-list">
+              <article v-for="item in jobItems" :key="item.id" class="job-item">
+                <div class="job-main">
+                  <div>
+                    <strong>{{ item.analysis_type }}</strong>
+                    <p>{{ scopeLabel(item.analysis_scope) }} · {{ labelValue(item.status) }} · {{ item.dataset_id }}</p>
+                  </div>
+                  <StatusBadge :label="labelValue(item.status)" :tone="jobTone(item.status)" />
+                </div>
+                <code class="job-id">{{ item.id }}</code>
+                <div class="job-meta">
+                  <span>{{ t('analysis.startedAt') }}: {{ item.started_at || '-' }}</span>
+                  <span>{{ t('analysis.finishedAt') }}: {{ item.finished_at || '-' }}</span>
+                </div>
+                <div class="actions">
+                  <button class="secondary-button" type="button" @click="openOutputs(item.id)">{{ t('analysis.viewOutputs') }}</button>
+                </div>
+              </article>
+              <EmptyState v-if="!jobItems.length" :title="t('analysis.noJobsTitle')" :description="t('analysis.noJobsDescription')" />
             </div>
-          </article>
+          </BaseSection>
+
+          <BaseSection :title="t('analysis.outputsTitle')" :description="selectedJob ? `${selectedJob.analysis_type} · ${selectedJob.dataset_id}` : t('analysis.outputsDescription')">
+            <div v-if="outputs.length" class="output-list">
+              <article v-for="output in outputs" :key="output.id" class="output-card">
+                <strong>{{ output.title }}</strong>
+                <p class="output-summary">{{ output.summary }}</p>
+
+                <div class="summary-grid">
+                  <div v-for="(card, index) in summaryCards(output)" :key="index" class="summary-card">
+                    <span>{{ card.label }}</span>
+                    <strong>{{ card.value }}</strong>
+                  </div>
+                </div>
+
+                <div class="term-list">
+                  <span v-for="(term, index) in topTerms(output)" :key="index" class="term-chip">
+                    {{ term.term }} · {{ term.count }}
+                  </span>
+                </div>
+              </article>
+            </div>
+            <EmptyState v-else :title="t('analysis.noOutputsTitle')" :description="t('analysis.noOutputsDescription')" />
+          </BaseSection>
         </div>
-        <div v-else class="muted">No outputs loaded.</div>
-      </section>
+      </main>
     </div>
   </section>
 </template>
@@ -211,7 +266,54 @@ function topTerms(output: AnalysisOutput) {
   gap: 18px;
 }
 
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.analysis-workspace {
+  display: grid;
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.analysis-side-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 104px);
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.analysis-main-panel {
+  min-width: 0;
+}
+
+.analysis-side-panel .grid-two {
+  grid-template-columns: 1fr;
+}
+
+.analysis-side-panel .actions {
+  display: grid;
+}
+
+.analysis-side-panel .primary-button,
+.analysis-side-panel .secondary-button {
+  width: 100%;
+}
+
 .section-card {
+  border-radius: 24px;
+  padding: 22px;
+}
+
+.stat-card {
   border-radius: 24px;
   padding: 22px;
 }
@@ -227,11 +329,18 @@ function topTerms(output: AnalysisOutput) {
 .section-head p,
 .muted,
 .field span,
+.stat-card span,
 .job-item p,
 .job-meta,
 .output-summary,
 .summary-card span {
   color: #64748b;
+}
+
+.stat-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 34px;
 }
 
 .grid-two {
@@ -364,6 +473,21 @@ function topTerms(output: AnalysisOutput) {
 }
 
 @media (max-width: 980px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analysis-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-side-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
   .split-grid,
   .grid-two,
   .summary-grid {

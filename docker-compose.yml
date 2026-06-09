@@ -1,0 +1,46 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      MEDIASPIDER_STORAGE_DIR: /app/backend/storage
+      MEDIASPIDER_SQLITE_PATH: /app/backend/storage/mediaspider-intel.sqlite3
+      MEDIASPIDER_REPOSITORY_MODE: sqlite
+      MEDIASPIDER_DATASET_REPOSITORY: sqlite
+      MEDIASPIDER_TASK_REPOSITORY: sqlite
+      MEDIASPIDER_SIGNAL_REPOSITORY: sqlite
+      MEDIASPIDER_ENTITY_REPOSITORY: sqlite
+      MEDIASPIDER_CASE_REPOSITORY: sqlite
+      MEDIASPIDER_EVIDENCE_REPOSITORY: sqlite
+      MEDIASPIDER_REPORT_REPOSITORY: sqlite
+      MEDIASPIDER_NOTIFICATION_REPOSITORY: sqlite
+      MEDIASPIDER_MEDIA_CRAWLER_ROOT: /app/mediacrawler
+      MEDIASPIDER_AUTH_REQUIRED: "false"
+      MEDIASPIDER_AUTH_SECRET: change-me
+      MEDIASPIDER_AUTH_USERS: admin:admin:admin:Administrator,analyst:analyst:analyst:Analyst
+      MEDIASPIDER_SCHEDULER_ENABLED: "false"
+      MEDIASPIDER_SCHEDULER_INTERVAL_SECONDS: 60
+      MEDIASPIDER_SCHEDULER_EXECUTE_CRAWLER: "true"
+    volumes:
+      - mediaspider-storage:/app/backend/storage
+      - ./data-contracts:/app/data-contracts:ro
+    ports:
+      - "${MEDIASPIDER_BACKEND_PORT:-8180}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  mediaspider-storage:

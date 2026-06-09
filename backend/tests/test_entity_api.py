@@ -131,6 +131,73 @@ def test_entity_duplicate_alias_merges_linked_signals(tmp_path):
         set_container(original_container)
 
 
+def test_entity_list_supports_filters_search_and_pagination(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        samples = [
+            {
+                "entity_type": "account",
+                "display_name": "risk_account",
+                "platform": "xhs",
+                "risk_score": 72,
+                "status": "active",
+                "source_ref": {"source_entity_id": "account_001"},
+                "profile_json": {"aliases": ["risk_account", "ra001"]},
+            },
+            {
+                "entity_type": "contact_point",
+                "display_name": "abc12345",
+                "platform": "xhs",
+                "risk_score": 88,
+                "status": "active",
+                "source_ref": {"contact_point": "abc12345"},
+                "profile_json": {"aliases": ["abc12345"]},
+            },
+            {
+                "entity_type": "seller",
+                "display_name": "seller_1",
+                "platform": "xianyu",
+                "risk_score": 45,
+                "status": "dismissed",
+                "source_ref": {"seller_id": "seller_1"},
+                "profile_json": {"aliases": ["seller_1"]},
+            },
+        ]
+        for item in samples:
+            response = client.post("/api/entities", json=item)
+            assert response.status_code == 200
+
+        platform_response = client.get("/api/entities", params={"platform": "xianyu"})
+        assert platform_response.status_code == 200
+        assert platform_response.json()["entities"][0]["display_name"] == "seller_1"
+
+        type_response = client.get("/api/entities", params={"entity_type": "contact_point"})
+        assert type_response.status_code == 200
+        assert type_response.json()["entities"][0]["risk_score"] == 88
+
+        status_response = client.get("/api/entities", params={"status": "dismissed"})
+        assert status_response.status_code == 200
+        assert status_response.json()["entities"][0]["platform"] == "xianyu"
+
+        risk_response = client.get("/api/entities", params={"min_risk_score": 80})
+        assert risk_response.status_code == 200
+        assert [item["display_name"] for item in risk_response.json()["entities"]] == ["abc12345"]
+
+        query_response = client.get("/api/entities", params={"q": "ra001"})
+        assert query_response.status_code == 200
+        assert query_response.json()["entities"][0]["display_name"] == "risk_account"
+
+        page_response = client.get("/api/entities", params={"limit": 1, "offset": 1})
+        assert page_response.status_code == 200
+        assert len(page_response.json()["entities"]) == 1
+        assert page_response.json()["total"] == 3
+    finally:
+        set_container(original_container)
+
+
 def test_relation_duplicate_is_merged_with_evidence(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container

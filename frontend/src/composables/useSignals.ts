@@ -1,17 +1,20 @@
 import { onMounted, ref } from 'vue'
-import { listSignals } from '../api/signals'
+import { listSignalsPage, type SignalListFilters } from '../api/signals'
 import type { Signal } from '../types'
 
 export function useSignals() {
   const items = ref<Signal[]>([])
+  const total = ref(0)
   const isLoading = ref(false)
   const error = ref('')
 
-  async function fetchItems() {
+  async function fetchItems(filters?: SignalListFilters) {
     isLoading.value = true
     error.value = ''
     try {
-      items.value = await listSignals()
+      const result = await listSignalsPage(filters)
+      items.value = result.signals
+      total.value = result.total
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -21,5 +24,5 @@ export function useSignals() {
 
   onMounted(fetchItems)
 
-  return { items, isLoading, error, fetchItems }
+  return { items, total, isLoading, error, fetchItems }
 }

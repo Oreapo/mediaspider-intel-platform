@@ -32,6 +32,14 @@
 - `data-contracts/`
   统一数据实体与后续证据结构契约。
 
+## 使用说明
+
+平台各功能模块的操作说明见：
+
+- [MediaSpider 情报平台使用说明](docs/user-guide.md)
+- [缺口开发计划](docs/development-plan.md)
+- [Docker 部署说明](docs/deployment.md)
+
 ## 规划原则
 
 1. 复用现有 `MediaSpider` 的多平台采集能力，不另起一套抓取内核。

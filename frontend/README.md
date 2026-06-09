@@ -21,17 +21,22 @@
 
 ## 本地启动
 
-先启动后端：
+可选：复制根目录环境模板，后端启动器和 Vite 会共同读取该文件：
 
 ```powershell
-cd H:\MediaCrawler-main\products\mediaspider-intel-platform
-uv run python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+Copy-Item .env.example .env
+```
+
+在项目根目录先启动后端：
+
+```powershell
+.venv\Scripts\python.exe -m backend.app
 ```
 
 再启动前端：
 
 ```powershell
-cd H:\MediaCrawler-main\products\mediaspider-intel-platform\frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -39,9 +44,12 @@ npm run dev
 访问：
 
 - 前端：[http://127.0.0.1:5173](http://127.0.0.1:5173)
-- 后端健康检查：[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+- 后端健康检查：[http://127.0.0.1:8180/health](http://127.0.0.1:8180/health)
 
 说明：
 
-- 开发环境已通过 `vite.config.ts` 把 `/api` 代理到 `127.0.0.1:8000`
-- 如需直连其他后端地址，可通过 `VITE_API_BASE_URL` 覆盖默认 API 根路径
+- 本地启动入口读取 `MEDIASPIDER_BACKEND_HOST`、`MEDIASPIDER_BACKEND_PORT` 和 `MEDIASPIDER_BACKEND_RELOAD`
+- 开发环境已通过 `vite.config.ts` 把 `/api` 和 `/health` 代理到 `127.0.0.1:8180`
+- 如需代理到其他后端地址，可设置 `MEDIASPIDER_API_TARGET`
+- `VITE_API_BASE_URL` 用于覆盖浏览器请求使用的 API 根路径
+- Docker 容器内部仍使用 `8000`，不受本地开发端口影响

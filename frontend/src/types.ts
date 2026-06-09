@@ -3,6 +3,18 @@ export interface PlatformFieldOption {
   label: string
 }
 
+export interface AuthUser {
+  username: string
+  role: string
+  display_name: string
+}
+
+export interface LoginResponse {
+  token: string
+  token_type: string
+  user: AuthUser
+}
+
 export interface PlatformFieldSchema {
   key: string
   label: string
@@ -25,6 +37,25 @@ export interface PlatformTaskModel {
   supported_signal_extractors: string[]
   supported_analysis_types: string[]
   task_fields: PlatformFieldSchema[]
+}
+
+export interface PlatformProfile {
+  id: string
+  platform: string
+  profile_name: string
+  auth_type: string
+  credentials_ref: string
+  settings_json: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface PlatformProfileDiagnostics {
+  ready: boolean
+  errors: string[]
+  warnings: string[]
+  profile: PlatformProfile
+  runtime_keys: string[]
 }
 
 export interface CollectionTask {
@@ -64,6 +95,34 @@ export interface TaskRun {
   updated_at: string
 }
 
+export interface SchedulerRunHistoryItem {
+  ran_at: string
+  status: string
+  error?: string
+  results: Array<Record<string, unknown>>
+}
+
+export interface SchedulerStatus {
+  is_running: boolean
+  interval_seconds: number
+  execute_crawler: boolean
+  run_timeout_seconds: number
+  last_result: Record<string, unknown> | null
+  last_error: string
+  run_history: SchedulerRunHistoryItem[]
+}
+
+export interface CrawlerDiagnostics {
+  ready: boolean
+  media_crawler_root?: string
+  output_root?: string
+  log_path?: string
+  command: string[]
+  raw_command?: string[]
+  errors: string[]
+  warnings: string[]
+}
+
 export interface RunLogEntry {
   run: TaskRun
   has_log: boolean
@@ -76,6 +135,19 @@ export interface RunLogDetail {
   line_count: number
   truncated: boolean
   content: string
+}
+
+export interface AuditEvent {
+  id: string
+  action: string
+  actor_username: string
+  actor_role: string
+  target_type: string
+  target_id: string
+  summary: string
+  metadata_json: Record<string, unknown>
+  created_at: string
+  updated_at: string
 }
 
 export interface Signal {
@@ -91,6 +163,16 @@ export interface Signal {
   status: string
   created_at: string
   updated_at: string
+}
+
+export interface SignalDetailPayload {
+  signal: Signal
+  dataset: Dataset | null
+  preview: DatasetPreview
+  source_task: CollectionTask | null
+  source_run: TaskRun | null
+  linked_cases: CaseRecord[]
+  linked_case_details: CaseDetail[]
 }
 
 export interface RiskEntity {
@@ -176,9 +258,10 @@ export interface CaseDetail {
     signals: Signal[]
     entities: RiskEntity[]
     analysis_outputs: AnalysisOutput[]
-    evidence_packets: unknown[]
+    evidence_packets: EvidencePacket[]
   }
   timeline: CaseTimelineItem[]
+  audit_events: AuditEvent[]
 }
 
 export interface EvidencePacket {
@@ -230,8 +313,26 @@ export interface NotificationDelivery {
   status: string
   payload_json: Record<string, unknown>
   error_message: string
+  retry_count: number
+  last_attempt_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface NotificationInboxItem {
+  id: string
+  rule_id: string
+  rule_name: string
+  target_type: string
+  target_id: string
+  status: string
+  read: boolean
+  read_at: string | null
+  created_at: string
+  event_count: number
+  title: string
+  summary: string
+  payload_json: Record<string, unknown>
 }
 
 export interface Dataset {
@@ -281,4 +382,59 @@ export interface AnalysisOutput {
   payload_json: Record<string, unknown>
   created_at: string
   updated_at: string
+}
+
+export interface DashboardSummary {
+  summary: {
+    task_count: number
+    task_run_count: number
+    dataset_count: number
+    record_count: number
+    analysis_job_count: number
+    signal_count: number
+    high_risk_signal_count: number
+    confirmed_signal_count: number
+    entity_count: number
+    relation_count: number
+    case_count: number
+    open_case_count: number
+    evidence_packet_count: number
+  }
+  breakdowns: {
+    task_statuses: Record<string, number>
+    run_statuses: Record<string, number>
+    signal_risk_levels: Record<string, number>
+    signal_statuses: Record<string, number>
+    case_statuses: Record<string, number>
+    case_priorities: Record<string, number>
+  }
+  risk_distribution: {
+    platforms: Array<{
+      key: string
+      dataset_count: number
+      signal_count: number
+      high_risk_signal_count: number
+      entity_count: number
+    }>
+    scenarios: Array<{
+      key: string
+      dataset_count: number
+      signal_count: number
+      high_risk_signal_count: number
+      case_count: number
+    }>
+  }
+  pending: {
+    high_risk_signals: Signal[]
+    failed_runs: TaskRun[]
+    ready_cases: CaseRecord[]
+  }
+  latest: {
+    tasks: CollectionTask[]
+    datasets: Dataset[]
+    analysis_jobs: AnalysisJob[]
+    signals: Signal[]
+    cases: CaseRecord[]
+    evidence_packets: EvidencePacket[]
+  }
 }

@@ -33,9 +33,38 @@ export interface EntityMergePayload {
   evidence_ref_json?: Record<string, unknown>
 }
 
-export async function listEntities() {
-  const response = await http.get<{ entities: RiskEntity[] }>('/entities')
-  return response.entities
+export interface EntityListFilters {
+  platform?: string
+  entity_type?: string
+  status?: string
+  min_risk_score?: number
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export interface EntityListResult {
+  entities: RiskEntity[]
+  total: number
+}
+
+function queryString(filters?: EntityListFilters) {
+  const params = new URLSearchParams()
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value))
+    }
+  })
+  const text = params.toString()
+  return text ? `?${text}` : ''
+}
+
+export function listEntitiesPage(filters?: EntityListFilters) {
+  return http.get<EntityListResult>(`/entities${queryString(filters)}`)
+}
+
+export async function listEntities(filters?: EntityListFilters) {
+  return (await listEntitiesPage(filters)).entities
 }
 
 export async function getEntityDetail(entityId: string) {
