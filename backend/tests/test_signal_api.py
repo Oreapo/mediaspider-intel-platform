@@ -291,6 +291,65 @@ def test_signal_list_supports_filters_search_and_pagination(tmp_path):
         set_container(original_container)
 
 
+def test_signal_list_contract_is_preserved_in_sqlite_mode(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "storage" / "platform.sqlite3"
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", "sqlite")
+    monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", str(sqlite_path))
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        dataset = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "SQLite Signal Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+            },
+        ).json()["dataset"]
+        for index in range(3):
+            response = client.post(
+                "/api/signals",
+                json={
+                    "dataset_id": dataset["id"],
+                    "signal_type": "contact_point_hit",
+                    "signal_source": "sqlite-test",
+                    "risk_level": "high",
+                    "risk_score": 85,
+                    "summary": f"SQLite contact signal {index}",
+                    "status": "confirmed",
+                    "payload_json": {
+                        "source_ref": {
+                            "dataset_id": dataset["id"],
+                            "source_entity_id": f"sqlite_note_{index}",
+                        }
+                    },
+                },
+            )
+            assert response.status_code == 200
+
+        response = client.get(
+            "/api/signals",
+            params={
+                "dataset_id": dataset["id"],
+                "status": "confirmed",
+                "risk_level": "high",
+                "q": "sqlite_note",
+                "limit": 1,
+                "offset": 1,
+            },
+        )
+
+        assert response.status_code == 200
+        assert set(response.json()) == {"signals", "total"}
+        assert len(response.json()["signals"]) == 1
+        assert response.json()["total"] == 3
+    finally:
+        set_container(original_container)
+
+
 def test_signal_extraction_missing_dataset_returns_404(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container

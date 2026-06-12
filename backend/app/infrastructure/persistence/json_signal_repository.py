@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ...domain.models.signal import Signal
+from ...domain.models.signal import RiskLevel, Signal, SignalStatus, SignalType
 from ...domain.repositories.signal_repository import SignalRepository
 
 
@@ -11,8 +11,48 @@ class JsonSignalRepository(SignalRepository):
     def __init__(self, storage_file: Path):
         self.storage_file = storage_file
 
-    def list_signals(self) -> list[Signal]:
-        return sorted(self._load_all(), key=lambda signal: signal.updated_at, reverse=True)
+    def list_signals(
+        self,
+        *,
+        dataset_id: str | None = None,
+        status: SignalStatus | None = None,
+        risk_level: RiskLevel | None = None,
+        signal_type: SignalType | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Signal]:
+        signals = self._filtered_signals(
+            dataset_id=dataset_id,
+            status=status,
+            risk_level=risk_level,
+            signal_type=signal_type,
+            query=query,
+        )
+        if offset > 0:
+            signals = signals[offset:]
+        if limit is not None:
+            signals = signals[:limit]
+        return signals
+
+    def count_signals(
+        self,
+        *,
+        dataset_id: str | None = None,
+        status: SignalStatus | None = None,
+        risk_level: RiskLevel | None = None,
+        signal_type: SignalType | None = None,
+        query: str = "",
+    ) -> int:
+        return len(
+            self._filtered_signals(
+                dataset_id=dataset_id,
+                status=status,
+                risk_level=risk_level,
+                signal_type=signal_type,
+                query=query,
+            )
+        )
 
     def get_signal(self, signal_id: str) -> Signal | None:
         for signal in self._load_all():
@@ -40,6 +80,44 @@ class JsonSignalRepository(SignalRepository):
             return False
         self._save_all(filtered)
         return True
+
+    def _filtered_signals(
+        self,
+        *,
+        dataset_id: str | None,
+        status: SignalStatus | None,
+        risk_level: RiskLevel | None,
+        signal_type: SignalType | None,
+        query: str,
+    ) -> list[Signal]:
+        signals = sorted(self._load_all(), key=lambda signal: signal.updated_at, reverse=True)
+        if dataset_id:
+            signals = [signal for signal in signals if signal.dataset_id == dataset_id]
+        if status:
+            signals = [signal for signal in signals if signal.status == status]
+        if risk_level:
+            signals = [signal for signal in signals if signal.risk_level == risk_level]
+        if signal_type:
+            signals = [signal for signal in signals if signal.signal_type == signal_type]
+        needle = query.strip().lower()
+        if needle:
+            signals = [signal for signal in signals if self._matches_query(signal, needle)]
+        return signals
+
+    def _matches_query(self, signal: Signal, needle: str) -> bool:
+        values = [
+            signal.id,
+            signal.dataset_id,
+            signal.signal_type.value,
+            signal.signal_source,
+            signal.risk_level.value,
+            signal.status.value,
+            signal.summary,
+        ]
+        source_ref = signal.payload_json.get("source_ref")
+        if isinstance(source_ref, dict):
+            values.extend(str(value) for value in source_ref.values() if value is not None)
+        return any(needle in str(value).lower() for value in values)
 
     def _load_all(self) -> list[Signal]:
         if not self.storage_file.exists():

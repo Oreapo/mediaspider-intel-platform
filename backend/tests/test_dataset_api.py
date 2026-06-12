@@ -166,3 +166,45 @@ def test_dataset_list_supports_filters_search_and_pagination(tmp_path):
         assert page_response.json()["total"] == 3
     finally:
         set_container(original_container)
+
+
+def test_dataset_list_contract_is_preserved_in_sqlite_mode(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "storage" / "platform.sqlite3"
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", "sqlite")
+    monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", str(sqlite_path))
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        for index in range(3):
+            response = client.post(
+                "/api/datasets",
+                json={
+                    "dataset_name": f"SQLite Lead Dataset {index}",
+                    "dataset_type": "raw",
+                    "source_platform": "xhs",
+                    "scenario_type": "lead_diversion",
+                    "storage_uri": f"sqlite_lead_{index}.jsonl",
+                    "tags": ["lead", f"batch-{index}"],
+                },
+            )
+            assert response.status_code == 200
+
+        response = client.get(
+            "/api/datasets",
+            params={
+                "source_platform": "xhs",
+                "tag": "lead",
+                "q": "sqlite_lead",
+                "limit": 1,
+                "offset": 1,
+            },
+        )
+
+        assert response.status_code == 200
+        assert set(response.json()) == {"datasets", "total"}
+        assert len(response.json()["datasets"]) == 1
+        assert response.json()["total"] == 3
+    finally:
+        set_container(original_container)

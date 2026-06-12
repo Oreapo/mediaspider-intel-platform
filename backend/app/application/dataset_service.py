@@ -54,30 +54,17 @@ class DatasetService:
         limit: int | None = None,
         offset: int = 0,
     ) -> tuple[list[Dataset], int]:
-        datasets = self.repository.list_datasets()
-        if source_platform:
-            datasets = [dataset for dataset in datasets if dataset.source_platform == source_platform]
-        if dataset_type:
-            datasets = [dataset for dataset in datasets if dataset.dataset_type == dataset_type]
-        if scenario_type:
-            datasets = [dataset for dataset in datasets if dataset.scenario_type == scenario_type]
-        if tag:
-            tag_needle = tag.strip().lower()
-            datasets = [
-                dataset
-                for dataset in datasets
-                if any(tag_needle in item.lower() for item in dataset.tags)
-            ]
-        if query:
-            needle = query.strip().lower()
-            if needle:
-                datasets = [dataset for dataset in datasets if self._matches_query(dataset, needle)]
-        total = len(datasets)
-        if offset > 0:
-            datasets = datasets[offset:]
-        if limit is not None:
-            datasets = datasets[:limit]
-        return datasets, total
+        filters = {
+            "source_platform": source_platform,
+            "dataset_type": dataset_type,
+            "scenario_type": scenario_type,
+            "tag": tag,
+            "query": query,
+        }
+        return (
+            self.repository.list_datasets(**filters, limit=limit, offset=offset),
+            self.repository.count_datasets(**filters),
+        )
 
     def get_dataset(self, dataset_id: str) -> Dataset | None:
         return self.repository.get_dataset(dataset_id)
@@ -243,18 +230,3 @@ class DatasetService:
         if isinstance(value, (dict, list)):
             return json.dumps(value, ensure_ascii=False)
         return str(value)
-
-    def _matches_query(self, dataset: Dataset, needle: str) -> bool:
-        values = [
-            dataset.id,
-            dataset.dataset_name,
-            dataset.dataset_type.value,
-            dataset.source_platform.value,
-            dataset.scenario_type.value if dataset.scenario_type else "",
-            dataset.storage_uri,
-            dataset.schema_version,
-            dataset.source_task_id or "",
-            dataset.source_run_id or "",
-            *dataset.tags,
-        ]
-        return any(needle in str(value).lower() for value in values)

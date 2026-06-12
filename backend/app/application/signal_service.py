@@ -97,25 +97,17 @@ class SignalService:
         limit: int | None = None,
         offset: int = 0,
     ) -> tuple[list[Signal], int]:
-        signals = self.repository.list_signals()
-        if dataset_id:
-            signals = [signal for signal in signals if signal.dataset_id == dataset_id]
-        if status:
-            signals = [signal for signal in signals if signal.status == status]
-        if risk_level:
-            signals = [signal for signal in signals if signal.risk_level == risk_level]
-        if signal_type:
-            signals = [signal for signal in signals if signal.signal_type == signal_type]
-        if query:
-            needle = query.strip().lower()
-            if needle:
-                signals = [signal for signal in signals if self._matches_query(signal, needle)]
-        total = len(signals)
-        if offset > 0:
-            signals = signals[offset:]
-        if limit is not None:
-            signals = signals[:limit]
-        return signals, total
+        filters = {
+            "dataset_id": dataset_id,
+            "status": status,
+            "risk_level": risk_level,
+            "signal_type": signal_type,
+            "query": query,
+        }
+        return (
+            self.repository.list_signals(**filters, limit=limit, offset=offset),
+            self.repository.count_signals(**filters),
+        )
 
     def get_signal(self, signal_id: str) -> Signal | None:
         return self.repository.get_signal(signal_id)
@@ -643,18 +635,3 @@ class SignalService:
             RiskLevel.HIGH: 80,
             RiskLevel.CRITICAL: 95,
         }[risk_level]
-
-    def _matches_query(self, signal: Signal, needle: str) -> bool:
-        values = [
-            signal.id,
-            signal.dataset_id,
-            signal.signal_type.value,
-            signal.signal_source,
-            signal.risk_level.value,
-            signal.status.value,
-            signal.summary,
-        ]
-        source_ref = signal.payload_json.get("source_ref")
-        if isinstance(source_ref, dict):
-            values.extend(str(value) for value in source_ref.values() if value is not None)
-        return any(needle in str(value).lower() for value in values)

@@ -90,15 +90,16 @@ backend:8000/api/*
 
 因此前端运行在 `http://localhost:8080` 时不需要额外配置 API 地址。
 
-## 6. MediaCrawler 接入预留
+## 6. MediaCrawler 接入
 
-当前 Compose 已预留：
+平台主体不依赖 MediaCrawler 即可启动。需要执行真实采集任务时，在宿主机配置一个已授权的
+MediaCrawler 工作目录：
 
 ```text
-MEDIASPIDER_MEDIA_CRAWLER_ROOT=/app/mediacrawler
+MEDIASPIDER_MEDIA_CRAWLER_ROOT=/absolute/path/to/MediaCrawler
 ```
 
-后续阶段 5 会补充真实 MediaCrawler 挂载、登录态和采集运行配置。
+Docker Compose 默认不挂载外部 crawler 代码，避免下载仓库后引用不存在的容器路径。
 
 ## 7. 认证配置
 

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...domain.models.signal import Signal
+from ...domain.models.signal import RiskLevel, Signal, SignalStatus, SignalType
 from ...domain.repositories.signal_repository import SignalRepository
 
 
@@ -16,10 +16,59 @@ class SQLiteSignalRepository(SignalRepository):
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def list_signals(self) -> list[Signal]:
+    def list_signals(
+        self,
+        *,
+        dataset_id: str | None = None,
+        status: SignalStatus | None = None,
+        risk_level: RiskLevel | None = None,
+        signal_type: SignalType | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Signal]:
+        where_clause, parameters = self._filter_query(
+            dataset_id=dataset_id,
+            status=status,
+            risk_level=risk_level,
+            signal_type=signal_type,
+            query=query,
+        )
+        statement = f"SELECT * FROM signals{where_clause} ORDER BY updated_at DESC"
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM signals ORDER BY updated_at DESC").fetchall()
+            rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_signal(row) for row in rows]
+
+    def count_signals(
+        self,
+        *,
+        dataset_id: str | None = None,
+        status: SignalStatus | None = None,
+        risk_level: RiskLevel | None = None,
+        signal_type: SignalType | None = None,
+        query: str = "",
+    ) -> int:
+        where_clause, parameters = self._filter_query(
+            dataset_id=dataset_id,
+            status=status,
+            risk_level=risk_level,
+            signal_type=signal_type,
+            query=query,
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM signals{where_clause}",
+                tuple(parameters),
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     def get_signal(self, signal_id: str) -> Signal | None:
         with self._connect() as connection:
@@ -108,6 +157,7 @@ class SQLiteSignalRepository(SignalRepository):
             connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_type ON signals (signal_type)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_risk_level ON signals (risk_level)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_status ON signals (status)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_updated_at ON signals (updated_at DESC)")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -132,6 +182,53 @@ class SQLiteSignalRepository(SignalRepository):
                 "updated_at": self._parse_datetime(row["updated_at"]),
             }
         )
+
+    def _filter_query(
+        self,
+        *,
+        dataset_id: str | None,
+        status: SignalStatus | None,
+        risk_level: RiskLevel | None,
+        signal_type: SignalType | None,
+        query: str,
+    ) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if dataset_id:
+            clauses.append("dataset_id = ?")
+            parameters.append(dataset_id)
+        if status:
+            clauses.append("status = ?")
+            parameters.append(status.value)
+        if risk_level:
+            clauses.append("risk_level = ?")
+            parameters.append(risk_level.value)
+        if signal_type:
+            clauses.append("signal_type = ?")
+            parameters.append(signal_type.value)
+        needle = query.strip().lower()
+        if needle:
+            searchable_values = (
+                "id",
+                "dataset_id",
+                "signal_type",
+                "signal_source",
+                "risk_level",
+                "status",
+                "summary",
+                "json_extract(payload_json, '$.source_ref')",
+            )
+            clauses.append(
+                "("
+                + " OR ".join(f"lower(coalesce({value}, '')) LIKE ? ESCAPE '\\'" for value in searchable_values)
+                + ")"
+            )
+            parameters.extend([self._like_value(needle)] * len(searchable_values))
+        return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), parameters
+
+    def _like_value(self, value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
 
     def _load_json_dict(self, value: str) -> dict[str, Any]:
         try:

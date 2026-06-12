@@ -89,3 +89,44 @@ def test_app_container_can_switch_signal_repository_to_sqlite(tmp_path, monkeypa
 
     assert sqlite_path.exists()
     assert container.signal_service.get_signal(signal.id).summary == "SQLite signal"
+
+
+def test_sqlite_signal_repository_filters_counts_and_paginates(tmp_path):
+    repository = SQLiteSignalRepository(tmp_path / "storage.sqlite3")
+    now = datetime.utcnow()
+    signals = [
+        _signal("sig_contact", now).model_copy(
+            update={
+                "summary": "Contact point 100% match",
+                "payload_json": {"source_ref": {"source_entity_id": "note_contact"}},
+                "status": SignalStatus.CONFIRMED,
+            }
+        ),
+        _signal("sig_risk", now + timedelta(minutes=1)).model_copy(
+            update={
+                "signal_type": SignalType.RISK_TERM_HIT,
+                "risk_level": RiskLevel.MEDIUM,
+                "summary": "Risk term hit",
+                "payload_json": {"source_ref": {"source_entity_id": "note_risk"}},
+            }
+        ),
+        _signal("sig_manual", now + timedelta(minutes=2)).model_copy(
+            update={
+                "dataset_id": "ds_2",
+                "signal_type": SignalType.MANUAL,
+                "risk_level": RiskLevel.LOW,
+                "summary": "Manual review",
+                "payload_json": {"source_ref": {"source_entity_id": "note_manual"}},
+            }
+        ),
+    ]
+    for signal in signals:
+        repository.save_signal(signal)
+
+    assert [item.id for item in repository.list_signals(dataset_id="ds_2")] == ["sig_manual"]
+    assert [item.id for item in repository.list_signals(status=SignalStatus.CONFIRMED)] == ["sig_contact"]
+    assert [item.id for item in repository.list_signals(query="note_risk")] == ["sig_risk"]
+    assert [item.id for item in repository.list_signals(query="100%")] == ["sig_contact"]
+    assert repository.count_signals(risk_level=RiskLevel.HIGH) == 1
+    assert [item.id for item in repository.list_signals(limit=1, offset=1)] == ["sig_risk"]
+    assert repository.count_signals() == 3

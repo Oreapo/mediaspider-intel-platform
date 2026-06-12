@@ -6,7 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...domain.models.dataset import Dataset
+from ...domain.models.dataset import Dataset, DatasetType
+from ...domain.models.platform import PlatformKey
+from ...domain.models.task import ScenarioType
 from ...domain.repositories.dataset_repository import DatasetRepository
 
 
@@ -16,12 +18,59 @@ class SQLiteDatasetRepository(DatasetRepository):
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def list_datasets(self) -> list[Dataset]:
+    def list_datasets(
+        self,
+        *,
+        source_platform: PlatformKey | None = None,
+        dataset_type: DatasetType | None = None,
+        scenario_type: ScenarioType | None = None,
+        tag: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Dataset]:
+        where_clause, parameters = self._filter_query(
+            source_platform=source_platform,
+            dataset_type=dataset_type,
+            scenario_type=scenario_type,
+            tag=tag,
+            query=query,
+        )
+        statement = f"SELECT * FROM datasets{where_clause} ORDER BY updated_at DESC"
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM datasets ORDER BY updated_at DESC"
-            ).fetchall()
+            rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_dataset(row) for row in rows]
+
+    def count_datasets(
+        self,
+        *,
+        source_platform: PlatformKey | None = None,
+        dataset_type: DatasetType | None = None,
+        scenario_type: ScenarioType | None = None,
+        tag: str = "",
+        query: str = "",
+    ) -> int:
+        where_clause, parameters = self._filter_query(
+            source_platform=source_platform,
+            dataset_type=dataset_type,
+            scenario_type=scenario_type,
+            tag=tag,
+            query=query,
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM datasets{where_clause}",
+                tuple(parameters),
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     def get_dataset(self, dataset_id: str) -> Dataset | None:
         with self._connect() as connection:
@@ -122,6 +171,9 @@ class SQLiteDatasetRepository(DatasetRepository):
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_datasets_scenario_type ON datasets (scenario_type)"
             )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_datasets_updated_at ON datasets (updated_at DESC)"
+            )
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -148,6 +200,58 @@ class SQLiteDatasetRepository(DatasetRepository):
                 "updated_at": self._parse_datetime(row["updated_at"]),
             }
         )
+
+    def _filter_query(
+        self,
+        *,
+        source_platform: PlatformKey | None,
+        dataset_type: DatasetType | None,
+        scenario_type: ScenarioType | None,
+        tag: str,
+        query: str,
+    ) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if source_platform:
+            clauses.append("source_platform = ?")
+            parameters.append(source_platform.value)
+        if dataset_type:
+            clauses.append("dataset_type = ?")
+            parameters.append(dataset_type.value)
+        if scenario_type:
+            clauses.append("scenario_type = ?")
+            parameters.append(scenario_type.value)
+        tag_needle = tag.strip().lower()
+        if tag_needle:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM json_each(datasets.tags_json) WHERE lower(CAST(value AS TEXT)) LIKE ? ESCAPE '\\')"
+            )
+            parameters.append(self._like_value(tag_needle))
+        query_needle = query.strip().lower()
+        if query_needle:
+            searchable_columns = (
+                "id",
+                "dataset_name",
+                "dataset_type",
+                "source_platform",
+                "scenario_type",
+                "storage_uri",
+                "schema_version",
+                "source_task_id",
+                "source_run_id",
+                "tags_json",
+            )
+            clauses.append(
+                "("
+                + " OR ".join(f"lower(coalesce({column}, '')) LIKE ? ESCAPE '\\'" for column in searchable_columns)
+                + ")"
+            )
+            parameters.extend([self._like_value(query_needle)] * len(searchable_columns))
+        return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), parameters
+
+    def _like_value(self, value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
 
     def _load_json_list(self, value: str) -> list[Any]:
         try:

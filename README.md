@@ -1,64 +1,98 @@
 # MediaSpider Intelligence Platform
 
-这是 `MediaSpider` 的下一代产品目录。
+MediaSpider Intelligence Platform is a full-stack investigation workbench for collecting public data, organizing datasets, extracting risk signals, linking entities, managing cases, and exporting evidence.
 
-产品主线已经重新收口为：
+The repository contains a FastAPI backend, a Vue 3 frontend, SQLite persistence, Docker deployment, and automated tests. The default `main` branch is intended to be directly runnable.
 
-- 以**情报采集**为入口
-- 以**反黑灰风险识别**为主要目标
-- 以**数据集、线索、案件、证据包**为核心资产
+## Features
 
-它不是传统“内容研究平台”，也不是单纯“多平台爬虫工具”。  
-它的目标是把公开数据采集、风险信号提取、跨平台关联分析和案件化输出放进同一套工作台。
+- Multi-platform collection task management
+- Dataset ingestion, filtering, preview, and pagination
+- Analysis jobs and structured outputs
+- Risk signals, entities, relations, and case workspaces
+- Evidence packets and investigation reports
+- Notification rules, delivery history, and inbox messages
+- Audit events, role-based access control, and platform profiles
+- JSON-to-SQLite migration and persistent Docker storage
 
-## 当前定位
+## Quick Start With Docker
 
-面向以下场景：
+Requirements:
 
-- 黑灰产引流链路识别
-- 账号矩阵与群控行为发现
-- 虚假交易 / 虚假宣传 / 招募引流识别
-- 敏感词、暗语、规避词演化追踪
-- 卖家 / 账号 / 内容 / 商品的跨平台关联排查
+- Docker
+- Docker Compose
 
-## 目录说明
+Run:
 
-- `docs/`
-  产品定义、反黑灰设计、架构、统一任务模型、前端信息架构。
-- `backend/`
-  新后端骨架，当前已具备 `tasks / datasets / analysis` 最小链路。
-- `frontend/`
-  新前端骨架，当前已具备可运行的 `dashboard / tasks / datasets / analysis` 工作台。
-- `data-contracts/`
-  统一数据实体与后续证据结构契约。
+```bash
+git clone https://github.com/Oreapo/mediaspider-intel-platform.git
+cd mediaspider-intel-platform
+docker compose up --build
+```
 
-## 使用说明
+Open:
 
-平台各功能模块的操作说明见：
+- Web application: http://localhost:8080
+- API documentation: http://localhost:8180/docs
+- Health check: http://localhost:8180/health
 
-- [MediaSpider 情报平台使用说明](docs/user-guide.md)
-- [缺口开发计划](docs/development-plan.md)
-- [Docker 部署说明](docs/deployment.md)
+The default Docker configuration uses SQLite in a named volume and does not require login. Before exposing the service outside a trusted development environment, copy `.env.example` to `.env`, enable authentication, and replace the example secret and users.
 
-## 规划原则
+## Local Development
 
-1. 复用现有 `MediaSpider` 的多平台采集能力，不另起一套抓取内核。
-2. 所有采集任务都要服务于“线索、风险、案件”三类情报对象，而不是只产出原始文件。
-3. 通用分析保留，但平台专属分析必须围绕反黑灰场景设计。
-4. 闲鱼项目只作为产品壳和单平台任务组织方式参考，不作为业务模型来源。
+Requirements:
 
-## 当前状态
+- Python 3.10 or newer
+- Node.js 20 or newer
 
-已完成：
+Install dependencies:
 
-- 产品方向重构
-- 新后端骨架
-- 新前端骨架
-- 通用数据集与分析闭环最小版
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt
+npm --prefix frontend ci
+Copy-Item .env.example .env
+```
 
-下一步重点：
+Start the backend:
 
-1. 建立线索与案件对象模型
-2. 接入真实采集执行链
-3. 实现平台专属反黑灰分析器
-4. 增加告警、规则、证据导出工作流
+```powershell
+.venv\Scripts\python.exe -m backend.app
+```
+
+Start the frontend in another terminal:
+
+```powershell
+npm --prefix frontend run dev
+```
+
+The frontend is available at http://127.0.0.1:5173 and proxies API requests to http://127.0.0.1:8180.
+
+On Linux or macOS, use `.venv/bin/python` instead of `.venv\Scripts\python.exe` and `cp .env.example .env` instead of `Copy-Item`.
+
+## Verification
+
+```powershell
+.venv\Scripts\python.exe -m pytest backend\tests
+npm --prefix frontend run build
+```
+
+GitHub Actions runs the same backend test suite and frontend production build on `main`.
+
+## Repository Layout
+
+- `backend/`: FastAPI application, domain services, repositories, migrations, and tests
+- `frontend/`: Vue 3 application and Nginx production configuration
+- `docs/`: architecture, deployment, operations, and user documentation
+- `data-contracts/`: shared data entity contracts
+- `docker-compose.yml`: complete local deployment
+
+## Documentation
+
+- [User guide](docs/user-guide.md)
+- [Deployment](docs/deployment.md)
+- [Architecture](docs/architecture.md)
+- [Persistence migration](docs/persistence-migration.md)
+- [Development plan](docs/development-plan.md)
+
+Real platform collection still depends on an authorized external MediaCrawler checkout configured through `MEDIASPIDER_MEDIA_CRAWLER_ROOT`. The rest of the application can run without it.

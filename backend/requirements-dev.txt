@@ -2,5 +2,4 @@ fastapi
 httpx
 pytest
 uvicorn
-sqlalchemy
 python-dotenv
