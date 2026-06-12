@@ -32,7 +32,7 @@ class DatasetService:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[Dataset]:
-        datasets, _ = self.list_datasets_page(
+        return self.repository.list_datasets(
             source_platform=source_platform,
             dataset_type=dataset_type,
             scenario_type=scenario_type,
@@ -41,7 +41,6 @@ class DatasetService:
             limit=limit,
             offset=offset,
         )
-        return datasets
 
     def list_datasets_page(
         self,

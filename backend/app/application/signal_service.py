@@ -75,7 +75,7 @@ class SignalService:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[Signal]:
-        signals, _ = self.list_signals_page(
+        return self.repository.list_signals(
             dataset_id=dataset_id,
             status=status,
             risk_level=risk_level,
@@ -84,7 +84,6 @@ class SignalService:
             limit=limit,
             offset=offset,
         )
-        return signals
 
     def list_signals_page(
         self,

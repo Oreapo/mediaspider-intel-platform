@@ -112,3 +112,46 @@ def test_app_container_can_switch_task_repository_to_sqlite(tmp_path, monkeypatc
 
     assert sqlite_path.exists()
     assert container.task_service.get_task(task.id).task_name == "SQLite Task"
+
+
+def test_sqlite_task_repository_filters_counts_and_paginates(tmp_path):
+    repository = SQLiteCollectionTaskRepository(tmp_path / "storage.sqlite3")
+    now = datetime.utcnow()
+    tasks = [
+        _task("tsk_xhs", now).model_copy(
+            update={
+                "task_name": "XHS Lead Search 100%",
+                "task_payload_json": {"keywords": ["abc12345 导流"]},
+                "notes": "contact lead watch",
+            }
+        ),
+        _task("tsk_dy", now + timedelta(minutes=1)).model_copy(
+            update={
+                "task_name": "DY Topic Search",
+                "platform": PlatformKey.DY,
+                "scenario_type": ScenarioType.TOPIC_WATCH,
+                "status": TaskStatus.DRAFT,
+                "task_payload_json": {"keywords": ["topic propagation"]},
+            }
+        ),
+        _task("tsk_xianyu", now + timedelta(minutes=2)).model_copy(
+            update={
+                "task_name": "Xianyu Seller Search",
+                "platform": PlatformKey.XIANYU,
+                "entity_type": EntityType.SELLER,
+                "scenario_type": ScenarioType.SELLER_RISK,
+                "status": TaskStatus.DISABLED,
+                "task_payload_json": {"keywords": ["低价手机"]},
+            }
+        ),
+    ]
+    for task in tasks:
+        repository.save_task(task)
+
+    assert [item.id for item in repository.list_tasks(platform=PlatformKey.XHS)] == ["tsk_xhs"]
+    assert [item.id for item in repository.list_tasks(status=TaskStatus.DISABLED)] == ["tsk_xianyu"]
+    assert [item.id for item in repository.list_tasks(query="abc12345")] == ["tsk_xhs"]
+    assert [item.id for item in repository.list_tasks(query="100%")] == ["tsk_xhs"]
+    assert repository.count_tasks(scenario_type=ScenarioType.TOPIC_WATCH) == 1
+    assert [item.id for item in repository.list_tasks(limit=1, offset=1)] == ["tsk_dy"]
+    assert repository.count_tasks() == 3

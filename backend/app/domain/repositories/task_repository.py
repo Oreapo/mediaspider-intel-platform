@@ -2,12 +2,37 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..models.task import CollectionTask, TaskRun
+from ..models.platform import PlatformKey
+from ..models.task import CollectionTask, EntityType, ScenarioType, TaskMode, TaskRun, TaskStatus
 
 
 class CollectionTaskRepository(ABC):
     @abstractmethod
-    def list_tasks(self) -> list[CollectionTask]:
+    def list_tasks(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        status: TaskStatus | None = None,
+        task_mode: TaskMode | None = None,
+        entity_type: EntityType | None = None,
+        scenario_type: ScenarioType | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[CollectionTask]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_tasks(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        status: TaskStatus | None = None,
+        task_mode: TaskMode | None = None,
+        entity_type: EntityType | None = None,
+        scenario_type: ScenarioType | None = None,
+        query: str = "",
+    ) -> int:
         raise NotImplementedError
 
     @abstractmethod

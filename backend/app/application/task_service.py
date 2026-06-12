@@ -37,7 +37,7 @@ class CollectionTaskService:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[CollectionTask]:
-        tasks, _ = self.list_tasks_page(
+        return self.repository.list_tasks(
             platform=platform,
             status=status,
             task_mode=task_mode,
@@ -47,7 +47,6 @@ class CollectionTaskService:
             limit=limit,
             offset=offset,
         )
-        return tasks
 
     def list_tasks_page(
         self,
@@ -61,27 +60,18 @@ class CollectionTaskService:
         limit: int | None = None,
         offset: int = 0,
     ) -> tuple[list[CollectionTask], int]:
-        tasks = self.repository.list_tasks()
-        if platform:
-            tasks = [task for task in tasks if task.platform == platform]
-        if status:
-            tasks = [task for task in tasks if task.status == status]
-        if task_mode:
-            tasks = [task for task in tasks if task.task_mode == task_mode]
-        if entity_type:
-            tasks = [task for task in tasks if task.entity_type == entity_type]
-        if scenario_type:
-            tasks = [task for task in tasks if task.scenario_type == scenario_type]
-        if query:
-            needle = query.strip().lower()
-            if needle:
-                tasks = [task for task in tasks if self._matches_query(task, needle)]
-        total = len(tasks)
-        if offset > 0:
-            tasks = tasks[offset:]
-        if limit is not None:
-            tasks = tasks[:limit]
-        return tasks, total
+        filters = {
+            "platform": platform,
+            "status": status,
+            "task_mode": task_mode,
+            "entity_type": entity_type,
+            "scenario_type": scenario_type,
+            "query": query,
+        }
+        return (
+            self.repository.list_tasks(**filters, limit=limit, offset=offset),
+            self.repository.count_tasks(**filters),
+        )
 
     def get_task(self, task_id: str) -> CollectionTask | None:
         return self.repository.get_task(task_id)
@@ -315,21 +305,6 @@ class CollectionTaskService:
         if len(parts) >= 2:
             return parts[-2]
         return "records"
-
-    def _matches_query(self, task: CollectionTask, needle: str) -> bool:
-        values = [
-            task.id,
-            task.task_name,
-            task.platform.value,
-            task.entity_type.value,
-            task.task_mode.value,
-            task.scenario_type.value,
-            task.status.value,
-            task.notes,
-            task.auth_profile_id or "",
-            ",".join(str(item) for item in task.task_payload_json.values()),
-        ]
-        return any(needle in str(value).lower() for value in values)
 
     def _apply_auth_profile(self, task: CollectionTask) -> CollectionTask:
         if not task.auth_profile_id or self.auth_profile_resolver is None:

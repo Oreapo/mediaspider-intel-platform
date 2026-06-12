@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...domain.models.task import CollectionTask, TaskRun
+from ...domain.models.platform import PlatformKey
+from ...domain.models.task import CollectionTask, EntityType, ScenarioType, TaskMode, TaskRun, TaskStatus
 from ...domain.repositories.task_repository import CollectionTaskRepository
 
 
@@ -16,12 +17,63 @@ class SQLiteCollectionTaskRepository(CollectionTaskRepository):
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def list_tasks(self) -> list[CollectionTask]:
+    def list_tasks(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        status: TaskStatus | None = None,
+        task_mode: TaskMode | None = None,
+        entity_type: EntityType | None = None,
+        scenario_type: ScenarioType | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[CollectionTask]:
+        where_clause, parameters = self._task_filter_query(
+            platform=platform,
+            status=status,
+            task_mode=task_mode,
+            entity_type=entity_type,
+            scenario_type=scenario_type,
+            query=query,
+        )
+        statement = f"SELECT * FROM collection_tasks{where_clause} ORDER BY updated_at DESC"
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM collection_tasks ORDER BY updated_at DESC"
-            ).fetchall()
+            rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_task(row) for row in rows]
+
+    def count_tasks(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        status: TaskStatus | None = None,
+        task_mode: TaskMode | None = None,
+        entity_type: EntityType | None = None,
+        scenario_type: ScenarioType | None = None,
+        query: str = "",
+    ) -> int:
+        where_clause, parameters = self._task_filter_query(
+            platform=platform,
+            status=status,
+            task_mode=task_mode,
+            entity_type=entity_type,
+            scenario_type=scenario_type,
+            query=query,
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM collection_tasks{where_clause}",
+                tuple(parameters),
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     def get_task(self, task_id: str) -> CollectionTask | None:
         with self._connect() as connection:
@@ -207,6 +259,7 @@ class SQLiteCollectionTaskRepository(CollectionTaskRepository):
             connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_platform ON collection_tasks (platform)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON collection_tasks (status)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_scenario ON collection_tasks (scenario_type)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON collection_tasks (updated_at DESC)")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS task_runs (
@@ -278,6 +331,57 @@ class SQLiteCollectionTaskRepository(CollectionTaskRepository):
                 "updated_at": self._parse_datetime(row["updated_at"]),
             }
         )
+
+    def _task_filter_query(
+        self,
+        *,
+        platform: PlatformKey | None,
+        status: TaskStatus | None,
+        task_mode: TaskMode | None,
+        entity_type: EntityType | None,
+        scenario_type: ScenarioType | None,
+        query: str,
+    ) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        enum_filters = (
+            ("platform", platform),
+            ("status", status),
+            ("task_mode", task_mode),
+            ("entity_type", entity_type),
+            ("scenario_type", scenario_type),
+        )
+        for column, value in enum_filters:
+            if value:
+                clauses.append(f"{column} = ?")
+                parameters.append(value.value)
+        needle = query.strip().lower()
+        if needle:
+            scalar_values = (
+                "id",
+                "task_name",
+                "platform",
+                "entity_type",
+                "task_mode",
+                "scenario_type",
+                "status",
+                "notes",
+                "auth_profile_id",
+            )
+            query_clauses = [
+                *(f"lower(coalesce({value}, '')) LIKE ? ESCAPE '\\'" for value in scalar_values),
+                (
+                    "EXISTS (SELECT 1 FROM json_each(collection_tasks.task_payload_json) "
+                    "WHERE lower(CAST(value AS TEXT)) LIKE ? ESCAPE '\\')"
+                ),
+            ]
+            clauses.append(f"({' OR '.join(query_clauses)})")
+            parameters.extend([self._like_value(needle)] * len(query_clauses))
+        return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), parameters
+
+    def _like_value(self, value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
 
     def _dump_json(self, value: object) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)

@@ -265,6 +265,53 @@ def test_task_list_supports_filters_search_and_pagination(tmp_path):
         set_container(original_container)
 
 
+def test_task_list_contract_is_preserved_in_sqlite_mode(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "storage" / "platform.sqlite3"
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", "sqlite")
+    monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", str(sqlite_path))
+    test_container = AppContainer(tmp_path, crawler_runner=FakeCrawlerRunner(tmp_path))
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        for index in range(3):
+            response = client.post(
+                "/api/tasks",
+                json={
+                    "task_name": f"SQLite Lead Search {index}",
+                    "platform": "xhs",
+                    "entity_type": "content",
+                    "task_mode": "search",
+                    "scenario_type": "lead_diversion",
+                    "status": "enabled",
+                    "task_payload_json": {"keywords": [f"sqlite_keyword_{index}"]},
+                    "notes": "sqlite pagination contract",
+                },
+            )
+            assert response.status_code == 200
+
+        response = client.get(
+            "/api/tasks",
+            params={
+                "platform": "xhs",
+                "status": "enabled",
+                "task_mode": "search",
+                "entity_type": "content",
+                "scenario_type": "lead_diversion",
+                "q": "sqlite_keyword",
+                "limit": 1,
+                "offset": 1,
+            },
+        )
+
+        assert response.status_code == 200
+        assert set(response.json()) == {"tasks", "total"}
+        assert len(response.json()["tasks"]) == 1
+        assert response.json()["total"] == 3
+    finally:
+        set_container(original_container)
+
+
 def test_crawler_diagnostics_reports_ready_command_and_validation_errors(tmp_path):
     media_root = tmp_path / "MediaCrawler"
     media_root.mkdir()

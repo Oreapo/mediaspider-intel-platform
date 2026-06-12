@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ...domain.models.task import CollectionTask, TaskRun
+from ...domain.models.platform import PlatformKey
+from ...domain.models.task import CollectionTask, EntityType, ScenarioType, TaskMode, TaskRun, TaskStatus
 from ...domain.repositories.task_repository import CollectionTaskRepository
 
 
@@ -12,8 +13,52 @@ class JsonCollectionTaskRepository(CollectionTaskRepository):
         self.storage_file = storage_file
         self.runs_file = runs_file or storage_file.with_name("task_runs.json")
 
-    def list_tasks(self) -> list[CollectionTask]:
-        return sorted(self._load_all(), key=lambda task: task.updated_at, reverse=True)
+    def list_tasks(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        status: TaskStatus | None = None,
+        task_mode: TaskMode | None = None,
+        entity_type: EntityType | None = None,
+        scenario_type: ScenarioType | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[CollectionTask]:
+        tasks = self._filtered_tasks(
+            platform=platform,
+            status=status,
+            task_mode=task_mode,
+            entity_type=entity_type,
+            scenario_type=scenario_type,
+            query=query,
+        )
+        if offset > 0:
+            tasks = tasks[offset:]
+        if limit is not None:
+            tasks = tasks[:limit]
+        return tasks
+
+    def count_tasks(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        status: TaskStatus | None = None,
+        task_mode: TaskMode | None = None,
+        entity_type: EntityType | None = None,
+        scenario_type: ScenarioType | None = None,
+        query: str = "",
+    ) -> int:
+        return len(
+            self._filtered_tasks(
+                platform=platform,
+                status=status,
+                task_mode=task_mode,
+                entity_type=entity_type,
+                scenario_type=scenario_type,
+                query=query,
+            )
+        )
 
     def get_task(self, task_id: str) -> CollectionTask | None:
         for task in self._load_all():
@@ -66,6 +111,47 @@ class JsonCollectionTaskRepository(CollectionTaskRepository):
             runs.append(run)
         self._save_runs(runs)
         return run
+
+    def _filtered_tasks(
+        self,
+        *,
+        platform: PlatformKey | None,
+        status: TaskStatus | None,
+        task_mode: TaskMode | None,
+        entity_type: EntityType | None,
+        scenario_type: ScenarioType | None,
+        query: str,
+    ) -> list[CollectionTask]:
+        tasks = sorted(self._load_all(), key=lambda task: task.updated_at, reverse=True)
+        if platform:
+            tasks = [task for task in tasks if task.platform == platform]
+        if status:
+            tasks = [task for task in tasks if task.status == status]
+        if task_mode:
+            tasks = [task for task in tasks if task.task_mode == task_mode]
+        if entity_type:
+            tasks = [task for task in tasks if task.entity_type == entity_type]
+        if scenario_type:
+            tasks = [task for task in tasks if task.scenario_type == scenario_type]
+        needle = query.strip().lower()
+        if needle:
+            tasks = [task for task in tasks if self._matches_query(task, needle)]
+        return tasks
+
+    def _matches_query(self, task: CollectionTask, needle: str) -> bool:
+        values = [
+            task.id,
+            task.task_name,
+            task.platform.value,
+            task.entity_type.value,
+            task.task_mode.value,
+            task.scenario_type.value,
+            task.status.value,
+            task.notes,
+            task.auth_profile_id or "",
+            ",".join(str(item) for item in task.task_payload_json.values()),
+        ]
+        return any(needle in str(value).lower() for value in values)
 
     def _load_all(self) -> list[CollectionTask]:
         if not self.storage_file.exists():
