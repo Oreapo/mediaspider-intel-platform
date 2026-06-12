@@ -1,17 +1,20 @@
 import { onMounted, ref } from 'vue'
-import { listAnalysisJobs } from '../api/analysis'
+import { listAnalysisJobsPage, type AnalysisJobListQuery } from '../api/analysis'
 import type { AnalysisJob } from '../types'
 
-export function useAnalysisJobs() {
+export function useAnalysisJobs(initialQuery?: AnalysisJobListQuery) {
   const items = ref<AnalysisJob[]>([])
+  const total = ref(0)
   const isLoading = ref(false)
   const error = ref('')
 
-  async function fetchItems() {
+  async function fetchItems(query?: AnalysisJobListQuery) {
     isLoading.value = true
     error.value = ''
     try {
-      items.value = await listAnalysisJobs()
+      const result = await listAnalysisJobsPage(query)
+      items.value = result.jobs
+      total.value = result.total
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -19,7 +22,7 @@ export function useAnalysisJobs() {
     }
   }
 
-  onMounted(fetchItems)
+  onMounted(() => fetchItems(initialQuery))
 
-  return { items, isLoading, error, fetchItems }
+  return { items, total, isLoading, error, fetchItems }
 }

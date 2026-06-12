@@ -1,4 +1,4 @@
-import { apiDownloadUrl, http } from '../lib/http'
+import { downloadApiFile, http } from '../lib/http'
 import type { EvidencePacket } from '../types'
 
 export interface EvidencePacketCreatePayload {
@@ -6,8 +6,31 @@ export interface EvidencePacketCreatePayload {
   packet_name: string
 }
 
-export async function listEvidencePackets() {
-  const response = await http.get<{ packets: EvidencePacket[] }>('/evidence')
+export interface EvidencePacketListQuery {
+  limit?: number
+  offset?: number
+}
+
+export interface EvidencePacketListResult {
+  packets: EvidencePacket[]
+  total: number
+}
+
+function queryString(query?: EvidencePacketListQuery) {
+  const params = new URLSearchParams()
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) params.set(key, String(value))
+  })
+  const text = params.toString()
+  return text ? `?${text}` : ''
+}
+
+export async function listEvidencePacketsPage(query?: EvidencePacketListQuery) {
+  return http.get<EvidencePacketListResult>(`/evidence${queryString(query)}`)
+}
+
+export async function listEvidencePackets(query?: EvidencePacketListQuery) {
+  const response = await listEvidencePacketsPage(query)
   return response.packets
 }
 
@@ -26,6 +49,6 @@ export async function deleteEvidencePacket(packetId: string, deleteStorage = fal
   return http.delete<{ message: string }>(`/evidence/${packetId}${suffix}`)
 }
 
-export function evidenceDownloadUrl(packetId: string) {
-  return apiDownloadUrl(`/evidence/${packetId}/download`)
+export function downloadEvidencePacket(packetId: string) {
+  return downloadApiFile(`/evidence/${packetId}/download`, `evidence-${packetId}.json`)
 }

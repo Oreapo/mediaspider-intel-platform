@@ -402,8 +402,18 @@ def test_delivery_list_supports_filters_and_pagination(tmp_path):
         assert sent[0]["status"] == "sent"
         assert sent[0]["target_id"] == signal_id
 
-        paged = client.get("/api/notifications/deliveries", params={"limit": 1, "offset": 1}).json()["deliveries"]
-        assert len(paged) == 1
+        paged_response = client.get("/api/notifications/deliveries", params={"limit": 1, "offset": 1})
+        assert paged_response.status_code == 200
+        paged = paged_response.json()
+        assert len(paged["deliveries"]) == 1
+        assert paged["total"] == 2
+
+        filtered_page = client.get(
+            "/api/notifications/deliveries",
+            params={"status": "sent", "limit": 1, "offset": 0},
+        ).json()
+        assert len(filtered_page["deliveries"]) == 1
+        assert filtered_page["total"] == 1
     finally:
         set_container(original_container)
 

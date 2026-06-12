@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..dependencies import ANALYST_ROLES, READ_ROLES, get_analysis_service, require_roles
 from ..schemas.analysis import AnalysisJobCreateRequest
@@ -11,8 +11,13 @@ router = APIRouter(prefix="/analysis", tags=["analysis"], dependencies=[Depends(
 
 
 @router.get("/jobs")
-def list_analysis_jobs(service: AnalysisService = Depends(get_analysis_service)):
-    return {"jobs": [job.model_dump(mode="json") for job in service.list_jobs()]}
+def list_analysis_jobs(
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: AnalysisService = Depends(get_analysis_service),
+):
+    jobs, total = service.list_jobs_page(limit=limit, offset=offset)
+    return {"jobs": [job.model_dump(mode="json") for job in jobs], "total": total}
 
 
 @router.post("/jobs", dependencies=[Depends(require_roles(*ANALYST_ROLES))])

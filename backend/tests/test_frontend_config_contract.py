@@ -14,6 +14,7 @@ FRONTEND_HTTP_CLIENT = FRONTEND_SRC / "lib" / "http.ts"
 FRONTEND_VITE_CONFIG = ROOT / "frontend" / "vite.config.ts"
 FRONTEND_SETTINGS_VIEW = FRONTEND_SRC / "views" / "SettingsView.vue"
 DOCKER_COMPOSE = ROOT / "docker-compose.yml"
+BACKEND_DOCKERFILE = ROOT / "backend" / "Dockerfile"
 FRONTEND_NGINX_CONFIG = ROOT / "frontend" / "nginx.conf"
 DEFAULT_BACKEND_TARGET = "http://127.0.0.1:8180"
 VITE_FRONTEND_ORIGINS = {
@@ -77,9 +78,15 @@ def test_vite_config_pins_frontend_root_for_local_dev_server():
 
 def test_docker_network_keeps_backend_container_port():
     compose = DOCKER_COMPOSE.read_text(encoding="utf-8")
+    backend_dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
     nginx = FRONTEND_NGINX_CONFIG.read_text(encoding="utf-8")
 
     assert '"${MEDIASPIDER_BACKEND_PORT:-8180}:8000"' in compose
+    assert 'MEDIASPIDER_AUTO_MIGRATE_JSON: "true"' in compose
+    assert "MEDIASPIDER_ANALYSIS_REPOSITORY: sqlite" in compose
+    assert "MEDIASPIDER_PLATFORM_PROFILE_REPOSITORY: sqlite" in compose
+    assert "MEDIASPIDER_AUDIT_REPOSITORY: sqlite" in compose
+    assert 'CMD ["python", "scripts/start_backend.py"]' in backend_dockerfile
     assert "127.0.0.1:8000/health" in compose
     assert "http://backend:8000/api/" in nginx
     assert "http://backend:8000/health" in nginx
@@ -133,16 +140,27 @@ def test_frontend_http_calls_are_centralized_in_api_modules():
     assert direct_http_calls == []
 
 
-def test_frontend_download_urls_are_centralized_in_api_modules():
-    direct_download_urls = [
+def test_frontend_download_calls_are_centralized_in_api_modules():
+    direct_download_calls = [
         source
         for source in _frontend_source_files()
         if source != FRONTEND_HTTP_CLIENT
         and not _is_relative_to(source, FRONTEND_API_DIR)
-        and re.search(r"\bapiDownloadUrl\s*\(", source.read_text(encoding="utf-8"))
+        and re.search(r"\bdownloadApiFile\s*\(", source.read_text(encoding="utf-8"))
     ]
 
-    assert direct_download_urls == []
+    assert direct_download_calls == []
+
+
+def test_frontend_downloads_reuse_authenticated_error_handling():
+    client = FRONTEND_HTTP_CLIENT.read_text(encoding="utf-8")
+
+    assert "export async function downloadApiFile" in client
+    assert re.search(r"downloadApiFile.*?authorizedFetch\(path\)", client, re.S)
+    assert re.search(r"!response\.ok\)\s*throw await responseError\(response\)", client)
+    assert "response.headers.get('Content-Disposition')" in client
+    assert "URL.createObjectURL(blob)" in client
+    assert "URL.revokeObjectURL(objectUrl)" in client
 
 
 def test_settings_platform_profile_options_use_backend_platform_models():

@@ -8,8 +8,31 @@ export interface AnalysisJobCreatePayload {
   parameters_json?: Record<string, unknown>
 }
 
-export async function listAnalysisJobs() {
-  const response = await http.get<{ jobs: AnalysisJob[] }>('/analysis/jobs')
+export interface AnalysisJobListQuery {
+  limit?: number
+  offset?: number
+}
+
+export interface AnalysisJobListResult {
+  jobs: AnalysisJob[]
+  total: number
+}
+
+function queryString(query?: AnalysisJobListQuery) {
+  const params = new URLSearchParams()
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) params.set(key, String(value))
+  })
+  const text = params.toString()
+  return text ? `?${text}` : ''
+}
+
+export async function listAnalysisJobsPage(query?: AnalysisJobListQuery) {
+  return http.get<AnalysisJobListResult>(`/analysis/jobs${queryString(query)}`)
+}
+
+export async function listAnalysisJobs(query?: AnalysisJobListQuery) {
+  const response = await listAnalysisJobsPage(query)
   return response.jobs
 }
 

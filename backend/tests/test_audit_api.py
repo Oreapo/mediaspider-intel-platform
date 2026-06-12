@@ -56,6 +56,21 @@ def test_task_mutations_write_audit_events(tmp_path):
         actor_response = client.get("/api/logs/audit", params={"actor_username": "anonymous"})
         assert actor_response.status_code == 200
         assert len(actor_response.json()["events"]) == 2
+
+        paged_response = client.get("/api/logs/audit", params={"limit": 1, "offset": 1})
+        assert paged_response.status_code == 200
+        paged = paged_response.json()
+        assert len(paged["events"]) == 1
+        assert paged["total"] == 2
+
+        filtered_response = client.get(
+            "/api/logs/audit",
+            params={"action": "task.create", "limit": 1, "offset": 0},
+        )
+        assert filtered_response.status_code == 200
+        filtered = filtered_response.json()
+        assert len(filtered["events"]) == 1
+        assert filtered["total"] == 1
     finally:
         set_container(original_container)
 

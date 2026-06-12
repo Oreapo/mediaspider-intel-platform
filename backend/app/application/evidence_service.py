@@ -18,8 +18,11 @@ class EvidenceService:
         self.storage_root = storage_root
         self.storage_root.mkdir(parents=True, exist_ok=True)
 
-    def list_packets(self) -> list[EvidencePacket]:
-        return self.repository.list_packets()
+    def list_packets(self, *, limit: int | None = None, offset: int = 0) -> list[EvidencePacket]:
+        return self.repository.list_packets(limit=limit, offset=offset)
+
+    def list_packets_page(self, *, limit: int | None = None, offset: int = 0) -> tuple[list[EvidencePacket], int]:
+        return self.repository.list_packets(limit=limit, offset=offset), self.repository.count_packets()
 
     def get_packet(self, packet_id: str) -> EvidencePacket | None:
         return self.repository.get_packet(packet_id)

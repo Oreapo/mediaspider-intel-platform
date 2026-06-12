@@ -16,10 +16,25 @@ class SQLiteReportRepository(ReportRepository):
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def list_reports(self) -> list[Report]:
+    def list_reports(self, *, limit: int | None = None, offset: int = 0) -> list[Report]:
+        statement = "SELECT * FROM reports ORDER BY updated_at DESC"
+        parameters: list[int] = []
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM reports ORDER BY updated_at DESC").fetchall()
+            rows = connection.execute(statement, parameters).fetchall()
         return [self._row_to_report(row) for row in rows]
+
+    def count_reports(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute("SELECT COUNT(*) FROM reports").fetchone()
+        return int(row[0]) if row is not None else 0
 
     def get_report(self, report_id: str) -> Report | None:
         with self._connect() as connection:
@@ -98,6 +113,7 @@ class SQLiteReportRepository(ReportRepository):
             connection.execute("CREATE INDEX IF NOT EXISTS idx_reports_case_id ON reports (case_id)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_reports_type ON reports (report_type)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports (status)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_reports_updated_at ON reports (updated_at DESC)")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:

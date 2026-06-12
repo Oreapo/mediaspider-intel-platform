@@ -25,7 +25,7 @@ import { useEntities } from '../composables/useEntities'
 import { useI18n } from '../composables/useI18n'
 import { useSignals } from '../composables/useSignals'
 import { getAnalysisOutputs } from '../api/analysis'
-import { evidenceDownloadUrl, generateEvidencePacket } from '../api/evidence'
+import { downloadEvidencePacket, generateEvidencePacket } from '../api/evidence'
 import { requestConfirm } from '../lib/confirm'
 import { lastPageOffset } from '../lib/pagination'
 import { required, type ValidationErrors } from '../lib/validation'
@@ -47,6 +47,7 @@ const { t } = useI18n()
 const analysisOutputs = ref<AnalysisOutput[]>([])
 const selectedDetail = ref<CaseDetail | null>(null)
 const busy = ref(false)
+const downloadingEvidenceId = ref('')
 const message = ref('')
 const error = ref('')
 const caseErrors = ref<ValidationErrors>({})
@@ -366,6 +367,19 @@ async function inspectCase(caseId: string) {
     noteForm.value.case_id = caseId
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+async function downloadEvidence(packetId: string) {
+  message.value = ''
+  error.value = ''
+  downloadingEvidenceId.value = packetId
+  try {
+    await downloadEvidencePacket(packetId)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    downloadingEvidenceId.value = ''
   }
 }
 
@@ -828,7 +842,14 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
               <strong>{{ item.packet_name }}</strong>
               <span>{{ item.storage_uri }}</span>
             </div>
-            <a class="text-button download" :href="evidenceDownloadUrl(item.id)" target="_blank">{{ t('cases.download') }}</a>
+            <button
+              class="text-button download"
+              type="button"
+              :disabled="downloadingEvidenceId === item.id"
+              @click="downloadEvidence(item.id)"
+            >
+              {{ t('cases.download') }}
+            </button>
           </article>
           <EmptyState v-if="!selectedDetail.objects.evidence_packets.length" :title="t('cases.noEvidencePacks')" />
         </section>

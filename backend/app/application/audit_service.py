@@ -36,6 +36,32 @@ class AuditService:
             offset=offset,
         )
 
+    def list_events_page(
+        self,
+        *,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        actor_username: str | None = None,
+        action: str | None = None,
+        query: str = "",
+        created_from: str | None = None,
+        created_to: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[AuditEvent], int]:
+        filters = {
+            "target_type": target_type,
+            "target_id": target_id,
+            "actor_username": actor_username,
+            "action": action,
+            "query": query,
+            "created_from": created_from,
+            "created_to": created_to,
+        }
+        events = self.repository.list_events(**filters, limit=limit, offset=offset)
+        total = self.repository.count_events(**filters)
+        return events, total
+
     def record(
         self,
         *,

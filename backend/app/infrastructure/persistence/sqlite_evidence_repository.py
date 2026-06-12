@@ -16,10 +16,25 @@ class SQLiteEvidenceRepository(EvidenceRepository):
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def list_packets(self) -> list[EvidencePacket]:
+    def list_packets(self, *, limit: int | None = None, offset: int = 0) -> list[EvidencePacket]:
+        statement = "SELECT * FROM evidence_packets ORDER BY updated_at DESC"
+        parameters: list[int] = []
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM evidence_packets ORDER BY updated_at DESC").fetchall()
+            rows = connection.execute(statement, parameters).fetchall()
         return [self._row_to_packet(row) for row in rows]
+
+    def count_packets(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute("SELECT COUNT(*) FROM evidence_packets").fetchone()
+        return int(row[0]) if row is not None else 0
 
     def get_packet(self, packet_id: str) -> EvidencePacket | None:
         with self._connect() as connection:
@@ -84,6 +99,9 @@ class SQLiteEvidenceRepository(EvidenceRepository):
                 """
             )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_evidence_packets_case_id ON evidence_packets (case_id)")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_evidence_packets_updated_at ON evidence_packets (updated_at DESC)"
+            )
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:

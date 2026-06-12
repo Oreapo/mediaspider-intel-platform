@@ -1,4 +1,4 @@
-import { apiDownloadUrl, http } from '../lib/http'
+import { downloadApiFile, http } from '../lib/http'
 import type { Report } from '../types'
 
 export interface ReportGeneratePayload {
@@ -13,8 +13,31 @@ export interface ReportUpdatePayload {
   content_markdown?: string
 }
 
-export async function listReports() {
-  const response = await http.get<{ reports: Report[] }>('/reports')
+export interface ReportListQuery {
+  limit?: number
+  offset?: number
+}
+
+export interface ReportListResult {
+  reports: Report[]
+  total: number
+}
+
+function queryString(query?: ReportListQuery) {
+  const params = new URLSearchParams()
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) params.set(key, String(value))
+  })
+  const text = params.toString()
+  return text ? `?${text}` : ''
+}
+
+export async function listReportsPage(query?: ReportListQuery) {
+  return http.get<ReportListResult>(`/reports${queryString(query)}`)
+}
+
+export async function listReports(query?: ReportListQuery) {
+  const response = await listReportsPage(query)
   return response.reports
 }
 
@@ -37,6 +60,6 @@ export async function deleteReport(reportId: string, deleteStorage = false) {
   return http.delete<{ message: string }>(`/reports/${reportId}?delete_storage=${deleteStorage}`)
 }
 
-export function reportDownloadUrl(reportId: string) {
-  return apiDownloadUrl(`/reports/${reportId}/download`)
+export function downloadReport(reportId: string) {
+  return downloadApiFile(`/reports/${reportId}/download`, `report-${reportId}.md`)
 }

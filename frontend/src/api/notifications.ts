@@ -54,7 +54,10 @@ export async function listNotificationDeliveries(query: NotificationDeliveryQuer
   const response = await http.get<{ deliveries: NotificationDelivery[]; total: number }>(
     `/notifications/deliveries${suffix}`,
   )
-  return response.deliveries
+  return {
+    items: response.deliveries,
+    total: response.total,
+  }
 }
 
 export async function retryNotificationDelivery(deliveryId: string) {

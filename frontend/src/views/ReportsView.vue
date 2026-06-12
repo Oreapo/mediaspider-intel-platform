@@ -1,27 +1,32 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { deleteReport, generateReport, reportDownloadUrl, updateReport } from '../api/reports'
+import { deleteReport, downloadReport, generateReport, updateReport } from '../api/reports'
 import AppAlert from '../components/ui/AppAlert.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
+import PaginationBar from '../components/ui/PaginationBar.vue'
 import PermissionGate from '../components/ui/PermissionGate.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useCases } from '../composables/useCases'
 import { useI18n } from '../composables/useI18n'
 import { useReports } from '../composables/useReports'
 import { requestConfirm } from '../lib/confirm'
+import { lastPageOffset } from '../lib/pagination'
 import { required, type ValidationErrors } from '../lib/validation'
 import type { Report } from '../types'
 
 const { items: caseItems } = useCases()
+const reportLimit = 12
+const reportOffset = ref(0)
 const {
   items: reportItems,
+  total: reportTotal,
   isLoading,
   error: loadError,
   fetchItems,
-} = useReports()
+} = useReports({ limit: reportLimit, offset: 0 })
 const { t } = useI18n()
 
 const form = ref({
@@ -36,6 +41,7 @@ const editorForm = ref({
   content_markdown: '',
 })
 const isBusy = ref(false)
+const downloadingReportId = ref('')
 const message = ref('')
 const error = ref('')
 const formErrors = ref<ValidationErrors>({})
@@ -46,11 +52,28 @@ const selectedReport = computed<Report | undefined>(() =>
 )
 
 const stats = computed(() => [
-  { label: t('reports.statsReports'), value: reportItems.value.length },
+  { label: t('reports.statsReports'), value: reportTotal.value },
   { label: t('reports.statsGenerated'), value: reportItems.value.filter((item) => item.status === 'generated').length },
   { label: t('reports.statsCases'), value: new Set(reportItems.value.map((item) => item.case_id)).size },
   { label: t('reports.statsMarkdown'), value: reportItems.value.filter((item) => item.storage_uri.endsWith('.md')).length },
 ])
+
+async function fetchReportPage(offset = reportOffset.value) {
+  reportOffset.value = offset
+  await fetchItems({ limit: reportLimit, offset })
+  const normalizedOffset = lastPageOffset(reportTotal.value, reportLimit)
+  if (reportOffset.value > normalizedOffset) {
+    reportOffset.value = normalizedOffset
+    if (reportTotal.value > 0) {
+      await fetchItems({ limit: reportLimit, offset: normalizedOffset })
+    }
+  }
+}
+
+async function changeReportPage(offset: number) {
+  selectedReportId.value = ''
+  await fetchReportPage(offset)
+}
 
 function validateGenerateForm() {
   const errors: ValidationErrors = {}
@@ -94,7 +117,8 @@ async function submitReport() {
     selectedReportId.value = report.id
     message.value = t('reports.generatedMessage')
     form.value.report_name = ''
-    await fetchItems()
+    await fetchReportPage(0)
+    selectReport(report)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -128,7 +152,7 @@ async function saveReport() {
       content_markdown: editorForm.value.content_markdown,
     })
     message.value = t('reports.savedMessage')
-    await fetchItems()
+    await fetchReportPage()
     selectReport(report)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -151,9 +175,22 @@ async function removeReport(reportId: string) {
     await deleteReport(reportId, true)
     if (selectedReportId.value === reportId) selectedReportId.value = ''
     message.value = t('reports.deletedMessage')
-    await fetchItems()
+    await fetchReportPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+async function downloadReportFile(reportId: string) {
+  message.value = ''
+  error.value = ''
+  downloadingReportId.value = reportId
+  try {
+    await downloadReport(reportId)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    downloadingReportId.value = ''
   }
 }
 
@@ -257,13 +294,27 @@ function reportSignalCount(report: Report) {
             </div>
             <div class="actions">
               <button class="secondary-button" type="button" @click="selectReport(item)">{{ t('reports.edit') }}</button>
-              <a class="secondary-button link-button" :href="reportDownloadUrl(item.id)">{{ t('cases.download') }}</a>
+              <button
+                class="secondary-button"
+                type="button"
+                :disabled="downloadingReportId === item.id"
+                @click="downloadReportFile(item.id)"
+              >
+                {{ t('cases.download') }}
+              </button>
               <PermissionGate area="analysis" compact>
               <button class="secondary-button destructive" type="button" @click="removeReport(item.id)">{{ t('cases.delete') }}</button>
               </PermissionGate>
             </div>
           </article>
           <EmptyState v-if="!reportItems.length" :title="t('reports.emptyTitle')" :description="t('reports.emptyDescription')" />
+          <PaginationBar
+            :total="reportTotal"
+            :limit="reportLimit"
+            :offset="reportOffset"
+            :loading="isLoading"
+            @change="changeReportPage"
+          />
         </div>
       </BaseSection>
 

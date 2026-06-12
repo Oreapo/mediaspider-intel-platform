@@ -12,13 +12,6 @@ export function apiUrl(path: string) {
   return new URL(joinedPath, window.location.origin).toString()
 }
 
-export function apiDownloadUrl(path: string) {
-  const token = getAuthToken()
-  const url = new URL(apiUrl(path))
-  if (token) url.searchParams.set('access_token', token)
-  return url.toString()
-}
-
 export function getAuthToken() {
   return window.localStorage.getItem(TOKEN_KEY)
 }
@@ -55,23 +48,61 @@ function formatErrorDetail(detail: unknown): string | undefined {
   return undefined
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function authorizedFetch(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers)
   const token = getAuthToken()
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`)
   }
 
-  const response = await fetch(apiUrl(path), {
+  return fetch(apiUrl(path), {
     ...init,
     headers,
   })
+}
+
+async function responseError(response: Response) {
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    if (response.status === 401) clearAuthToken()
-    throw new Error(errorMessageFromPayload(data) || 'Request failed')
-  }
+  if (response.status === 401) clearAuthToken()
+  return new Error(errorMessageFromPayload(data) || 'Request failed')
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await authorizedFetch(path, init)
+  if (!response.ok) throw await responseError(response)
+  const data = await response.json().catch(() => ({}))
   return data as T
+}
+
+function downloadFilename(contentDisposition: string | null, fallbackFilename: string) {
+  if (!contentDisposition) return fallbackFilename
+
+  const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.replace(/^"|"$/g, ''))
+    } catch {
+      return encoded
+    }
+  }
+
+  return contentDisposition.match(/filename="?([^";]+)"?/i)?.[1] || fallbackFilename
+}
+
+export async function downloadApiFile(path: string, fallbackFilename: string) {
+  const response = await authorizedFetch(path)
+  if (!response.ok) throw await responseError(response)
+
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = downloadFilename(response.headers.get('Content-Disposition'), fallbackFilename)
+  link.hidden = true
+  document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
 }
 
 export const http = {

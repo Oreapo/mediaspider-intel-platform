@@ -112,10 +112,30 @@ def test_evidence_packet_generation_persists_manifest_and_links_case(tmp_path):
         manifest = json.loads(artifact_path.read_text(encoding="utf-8"))
         assert manifest["packet_id"] == packet["id"]
 
+        second_packet = client.post(
+            "/api/evidence/packets",
+            json={"case_id": case_id, "packet_name": "导流链路证据包 2"},
+        ).json()["packet"]
+        first_page = client.get("/api/evidence", params={"limit": 1, "offset": 0})
+        second_page = client.get("/api/evidence", params={"limit": 1, "offset": 1})
+        assert first_page.status_code == 200
+        assert first_page.json()["total"] == 2
+        assert len(first_page.json()["packets"]) == 1
+        assert second_page.status_code == 200
+        assert second_page.json()["total"] == 2
+        assert len(second_page.json()["packets"]) == 1
+        assert {
+            first_page.json()["packets"][0]["id"],
+            second_page.json()["packets"][0]["id"],
+        } == {packet["id"], second_packet["id"]}
+
         detail = client.get(f"/api/cases/{case_id}").json()
         evidence_links = [link for link in detail["links"] if link["link_type"] == "evidence_packet"]
-        assert len(evidence_links) == 1
-        assert detail["objects"]["evidence_packets"][0]["id"] == packet["id"]
+        assert len(evidence_links) == 2
+        assert {item["id"] for item in detail["objects"]["evidence_packets"]} == {
+            packet["id"],
+            second_packet["id"],
+        }
     finally:
         set_container(original_container)
 
@@ -160,8 +180,11 @@ def test_evidence_packet_download_accepts_query_access_token_when_auth_required(
         ).json()["packet"]
         token = headers["Authorization"].split(" ", 1)[1]
 
+        header_response = client.get(f"/api/evidence/{packet['id']}/download", headers=headers)
         response = client.get(f"/api/evidence/{packet['id']}/download", params={"access_token": token})
 
+        assert header_response.status_code == 200
+        assert header_response.json()["packet_id"] == packet["id"]
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("application/json")
         assert response.json()["packet_id"] == packet["id"]

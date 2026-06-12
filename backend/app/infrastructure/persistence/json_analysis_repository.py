@@ -12,8 +12,16 @@ class JsonAnalysisRepository(AnalysisRepository):
         self.jobs_file = jobs_file
         self.outputs_file = outputs_file
 
-    def list_jobs(self) -> list[AnalysisJob]:
-        return sorted(self._load_jobs(), key=lambda job: job.updated_at, reverse=True)
+    def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[AnalysisJob]:
+        jobs = sorted(self._load_jobs(), key=lambda job: job.updated_at, reverse=True)
+        if offset > 0:
+            jobs = jobs[offset:]
+        if limit is not None:
+            jobs = jobs[:limit]
+        return jobs
+
+    def count_jobs(self) -> int:
+        return len(self._load_jobs())
 
     def get_job(self, job_id: str) -> AnalysisJob | None:
         for job in self._load_jobs():

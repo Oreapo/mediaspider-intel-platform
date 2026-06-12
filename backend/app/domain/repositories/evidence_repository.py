@@ -7,7 +7,11 @@ from ..models.evidence import EvidencePacket
 
 class EvidenceRepository(ABC):
     @abstractmethod
-    def list_packets(self) -> list[EvidencePacket]:
+    def list_packets(self, *, limit: int | None = None, offset: int = 0) -> list[EvidencePacket]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_packets(self) -> int:
         raise NotImplementedError
 
     @abstractmethod

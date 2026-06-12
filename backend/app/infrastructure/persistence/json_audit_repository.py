@@ -24,6 +24,55 @@ class JsonAuditRepository(AuditRepository):
         limit: int | None = None,
         offset: int = 0,
     ) -> list[AuditEvent]:
+        events = self._filter_events(
+            target_type=target_type,
+            target_id=target_id,
+            actor_username=actor_username,
+            action=action,
+            query=query,
+            created_from=created_from,
+            created_to=created_to,
+        )
+        if offset:
+            events = events[offset:]
+        if limit is not None:
+            events = events[:limit]
+        return events
+
+    def count_events(
+        self,
+        *,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        actor_username: str | None = None,
+        action: str | None = None,
+        query: str = "",
+        created_from: str | None = None,
+        created_to: str | None = None,
+    ) -> int:
+        return len(
+            self._filter_events(
+                target_type=target_type,
+                target_id=target_id,
+                actor_username=actor_username,
+                action=action,
+                query=query,
+                created_from=created_from,
+                created_to=created_to,
+            )
+        )
+
+    def _filter_events(
+        self,
+        *,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        actor_username: str | None = None,
+        action: str | None = None,
+        query: str = "",
+        created_from: str | None = None,
+        created_to: str | None = None,
+    ) -> list[AuditEvent]:
         events = self._load_all()
         if target_type:
             events = [event for event in events if event.target_type == target_type]
@@ -40,12 +89,7 @@ class JsonAuditRepository(AuditRepository):
         normalized_query = query.strip().lower()
         if normalized_query:
             events = [event for event in events if normalized_query in self._search_text(event)]
-        events = sorted(events, key=lambda event: event.created_at, reverse=True)
-        if offset:
-            events = events[offset:]
-        if limit is not None:
-            events = events[:limit]
-        return events
+        return sorted(events, key=lambda event: event.created_at, reverse=True)
 
     def save_event(self, event: AuditEvent) -> AuditEvent:
         events = self._load_all()

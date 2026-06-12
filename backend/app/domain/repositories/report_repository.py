@@ -7,7 +7,11 @@ from ..models.report import Report
 
 class ReportRepository(ABC):
     @abstractmethod
-    def list_reports(self) -> list[Report]:
+    def list_reports(self, *, limit: int | None = None, offset: int = 0) -> list[Report]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_reports(self) -> int:
         raise NotImplementedError
 
     @abstractmethod

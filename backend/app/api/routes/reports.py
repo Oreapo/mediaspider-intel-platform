@@ -14,8 +14,13 @@ router = APIRouter(prefix="/reports", tags=["reports"], dependencies=[Depends(re
 
 
 @router.get("")
-def list_reports(service: ReportService = Depends(get_report_service)):
-    return {"reports": [report.model_dump(mode="json") for report in service.list_reports()]}
+def list_reports(
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: ReportService = Depends(get_report_service),
+):
+    reports, total = service.list_reports_page(limit=limit, offset=offset)
+    return {"reports": [report.model_dump(mode="json") for report in reports], "total": total}
 
 
 @router.post("", dependencies=[Depends(require_roles(*ANALYST_ROLES))])

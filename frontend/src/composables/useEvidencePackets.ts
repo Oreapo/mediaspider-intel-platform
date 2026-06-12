@@ -1,17 +1,20 @@
 import { onMounted, ref } from 'vue'
-import { listEvidencePackets } from '../api/evidence'
+import { listEvidencePacketsPage, type EvidencePacketListQuery } from '../api/evidence'
 import type { EvidencePacket } from '../types'
 
-export function useEvidencePackets() {
+export function useEvidencePackets(initialQuery?: EvidencePacketListQuery) {
   const items = ref<EvidencePacket[]>([])
+  const total = ref(0)
   const isLoading = ref(false)
   const error = ref('')
 
-  async function fetchItems() {
+  async function fetchItems(query?: EvidencePacketListQuery) {
     isLoading.value = true
     error.value = ''
     try {
-      items.value = await listEvidencePackets()
+      const result = await listEvidencePacketsPage(query)
+      items.value = result.packets
+      total.value = result.total
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -19,7 +22,7 @@ export function useEvidencePackets() {
     }
   }
 
-  onMounted(fetchItems)
+  onMounted(() => fetchItems(initialQuery))
 
-  return { items, isLoading, error, fetchItems }
+  return { items, total, isLoading, error, fetchItems }
 }

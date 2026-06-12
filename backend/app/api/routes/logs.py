@@ -28,7 +28,7 @@ def list_audit_events(
     offset: int = Query(default=0, ge=0),
     service: AuditService = Depends(get_audit_service),
 ):
-    events = service.list_events(
+    events, total = service.list_events_page(
         target_type=target_type,
         target_id=target_id,
         actor_username=actor_username,
@@ -39,7 +39,10 @@ def list_audit_events(
         limit=limit,
         offset=offset,
     )
-    return {"events": [event.model_dump(mode="json") for event in events]}
+    return {
+        "events": [event.model_dump(mode="json") for event in events],
+        "total": total,
+    }
 
 
 @router.get("/runs/{run_id}")

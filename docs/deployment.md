@@ -49,6 +49,17 @@ SQLite 文件路径：
 /app/backend/storage/mediaspider-intel.sqlite3
 ```
 
+Compose 默认启用一次性 JSON 迁移：
+
+```text
+MEDIASPIDER_AUTO_MIGRATE_JSON=true
+```
+
+后端容器只会在 SQLite 文件尚不存在时，把同一存储目录中的 JSON 数据导入
+临时数据库；全部迁移成功后才原子替换为正式 SQLite 文件，然后再启动 API。
+迁移失败不会留下被误判为完成的目标数据库。后续重启会跳过迁移，避免旧 JSON 覆盖已更新的 SQLite 数据。
+升级前仍应先备份存储卷；若 SQLite 文件已经存在，需要手动执行迁移命令并核对计数。
+
 ## 4. 存储备份
 
 本地或服务器上可以使用备份脚本把 `backend/storage` 打包成 zip：

@@ -14,8 +14,13 @@ router = APIRouter(prefix="/evidence", tags=["evidence"], dependencies=[Depends(
 
 
 @router.get("")
-def list_evidence_packets(service: EvidenceService = Depends(get_evidence_service)):
-    return {"packets": [packet.model_dump(mode="json") for packet in service.list_packets()]}
+def list_evidence_packets(
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: EvidenceService = Depends(get_evidence_service),
+):
+    packets, total = service.list_packets_page(limit=limit, offset=offset)
+    return {"packets": [packet.model_dump(mode="json") for packet in packets], "total": total}
 
 
 @router.post("/packets", dependencies=[Depends(require_roles(*ANALYST_ROLES))])

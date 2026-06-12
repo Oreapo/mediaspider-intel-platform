@@ -18,8 +18,11 @@ class ReportService:
         self.storage_root = storage_root
         self.storage_root.mkdir(parents=True, exist_ok=True)
 
-    def list_reports(self) -> list[Report]:
-        return self.repository.list_reports()
+    def list_reports(self, *, limit: int | None = None, offset: int = 0) -> list[Report]:
+        return self.repository.list_reports(limit=limit, offset=offset)
+
+    def list_reports_page(self, *, limit: int | None = None, offset: int = 0) -> tuple[list[Report], int]:
+        return self.repository.list_reports(limit=limit, offset=offset), self.repository.count_reports()
 
     def get_report(self, report_id: str) -> Report | None:
         return self.repository.get_report(report_id)

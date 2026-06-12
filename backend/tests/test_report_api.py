@@ -122,6 +122,24 @@ def test_generate_report_from_case_and_download(tmp_path):
         list_response = client.get("/api/reports")
         assert list_response.status_code == 200
         assert list_response.json()["reports"][0]["id"] == report["id"]
+        assert list_response.json()["total"] == 1
+
+        second_report = client.post(
+            "/api/reports",
+            json={
+                "case_id": case_id,
+                "report_name": "导流链路研判报告 2",
+                "report_type": "investigation_brief",
+            },
+        ).json()["report"]
+        first_page = client.get("/api/reports", params={"limit": 1, "offset": 0})
+        second_page = client.get("/api/reports", params={"limit": 1, "offset": 1})
+        assert first_page.json()["total"] == 2
+        assert second_page.json()["total"] == 2
+        assert {
+            first_page.json()["reports"][0]["id"],
+            second_page.json()["reports"][0]["id"],
+        } == {report["id"], second_report["id"]}
 
         detail_response = client.get(f"/api/reports/{report['id']}")
         assert detail_response.status_code == 200
@@ -170,8 +188,11 @@ def test_report_download_accepts_query_access_token_when_auth_required(tmp_path,
         ).json()["report"]
         token = headers["Authorization"].split(" ", 1)[1]
 
+        header_response = client.get(f"/api/reports/{report['id']}/download", headers=headers)
         response = client.get(f"/api/reports/{report['id']}/download", params={"access_token": token})
 
+        assert header_response.status_code == 200
+        assert "查询 Token 下载报告" in header_response.text
         assert response.status_code == 200
         assert "查询 Token 下载报告" in response.text
     finally:

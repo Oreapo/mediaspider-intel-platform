@@ -11,7 +11,9 @@ import type { NotificationDelivery, NotificationInboxItem, NotificationRule } fr
 export function useNotifications() {
   const rules = ref<NotificationRule[]>([])
   const deliveries = ref<NotificationDelivery[]>([])
+  const deliveryTotal = ref(0)
   const inbox = ref<NotificationInboxItem[]>([])
+  const inboxTotal = ref(0)
   const unreadCount = ref(0)
   const deliveryQuery = ref<NotificationDeliveryQuery>({
     limit: 20,
@@ -34,8 +36,10 @@ export function useNotifications() {
         listNotificationInbox(inboxQuery.value),
       ])
       rules.value = ruleItems
-      deliveries.value = deliveryItems
+      deliveries.value = deliveryItems.items
+      deliveryTotal.value = deliveryItems.total
       inbox.value = inboxItems.items
+      inboxTotal.value = inboxItems.total
       unreadCount.value = inboxItems.unread_count
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
@@ -65,7 +69,9 @@ export function useNotifications() {
   return {
     rules,
     deliveries,
+    deliveryTotal,
     inbox,
+    inboxTotal,
     unreadCount,
     deliveryQuery,
     inboxQuery,

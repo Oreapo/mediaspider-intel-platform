@@ -27,20 +27,17 @@ def test_frontend_api_calls_match_backend_routes():
     assert missing == []
 
 
-def test_frontend_download_urls_match_backend_routes():
+def test_frontend_download_calls_match_backend_routes():
     backend_routes = _backend_routes()
     download_paths = sorted(_frontend_download_paths())
 
-    mismatches = []
+    missing = []
     for path in download_paths:
         operation = _matching_backend_operation("get", path, backend_routes)
         if operation is None:
-            mismatches.append(f"GET {path}")
-            continue
-        if "access_token" not in _backend_query_params(operation):
-            mismatches.append(f"GET {path}?access_token")
+            missing.append(f"GET {path}")
 
-    assert mismatches == []
+    assert missing == []
 
 
 def test_frontend_literal_query_params_match_backend_routes():
@@ -211,7 +208,7 @@ def _frontend_download_paths() -> set[str]:
 
 def _extract_api_download_paths(text: str) -> list[str]:
     paths: list[str] = []
-    for match in re.finditer(r"\bapiDownloadUrl\s*\(", text):
+    for match in re.finditer(r"\bdownloadApiFile\s*\(", text):
         index = _skip_whitespace(text, match.end())
         if index >= len(text) or text[index] not in {"'", '"', "`"}:
             continue

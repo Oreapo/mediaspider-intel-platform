@@ -15,8 +15,11 @@ class AnalysisService:
         self.repository = repository
         self.dataset_service = dataset_service
 
-    def list_jobs(self) -> list[AnalysisJob]:
-        return self.repository.list_jobs()
+    def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[AnalysisJob]:
+        return self.repository.list_jobs(limit=limit, offset=offset)
+
+    def list_jobs_page(self, *, limit: int | None = None, offset: int = 0) -> tuple[list[AnalysisJob], int]:
+        return self.repository.list_jobs(limit=limit, offset=offset), self.repository.count_jobs()
 
     def get_job(self, job_id: str) -> AnalysisJob | None:
         return self.repository.get_job(job_id)

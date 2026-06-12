@@ -29,6 +29,7 @@ from ...infrastructure.persistence.json_platform_profile_repository import JsonP
 from ...infrastructure.persistence.json_report_repository import JsonReportRepository
 from ...infrastructure.persistence.json_signal_repository import JsonSignalRepository
 from ...infrastructure.persistence.json_task_repository import JsonCollectionTaskRepository
+from ...infrastructure.persistence.sqlite_analysis_repository import SQLiteAnalysisRepository
 from ...infrastructure.persistence.sqlite_dataset_repository import SQLiteDatasetRepository
 from ...infrastructure.persistence.sqlite_audit_repository import SQLiteAuditRepository
 from ...infrastructure.persistence.sqlite_case_repository import SQLiteCaseRepository
@@ -52,10 +53,7 @@ class AppContainer:
         self.storage_dir = Path(os.getenv("MEDIASPIDER_STORAGE_DIR", str(root_dir / "storage")))
         self._task_repository = self._build_task_repository()
         self._dataset_repository = self._build_dataset_repository()
-        self._analysis_repository = JsonAnalysisRepository(
-            self.storage_dir / "analysis_jobs.json",
-            self.storage_dir / "analysis_outputs.json",
-        )
+        self._analysis_repository = self._build_analysis_repository()
         self._signal_repository = self._build_signal_repository()
         self._entity_repository = self._build_entity_repository()
         self._case_repository = self._build_case_repository()
@@ -215,6 +213,14 @@ class AppContainer:
         return JsonCollectionTaskRepository(
             self.storage_dir / "collection_tasks.json",
             self.storage_dir / "task_runs.json",
+        )
+
+    def _build_analysis_repository(self):
+        if self._uses_sqlite("MEDIASPIDER_ANALYSIS_REPOSITORY"):
+            return SQLiteAnalysisRepository(self._sqlite_path())
+        return JsonAnalysisRepository(
+            self.storage_dir / "analysis_jobs.json",
+            self.storage_dir / "analysis_outputs.json",
         )
 
     def _build_signal_repository(self):

@@ -11,8 +11,16 @@ class JsonEvidenceRepository(EvidenceRepository):
     def __init__(self, storage_file: Path):
         self.storage_file = storage_file
 
-    def list_packets(self) -> list[EvidencePacket]:
-        return sorted(self._load_all(), key=lambda packet: packet.updated_at, reverse=True)
+    def list_packets(self, *, limit: int | None = None, offset: int = 0) -> list[EvidencePacket]:
+        packets = sorted(self._load_all(), key=lambda packet: packet.updated_at, reverse=True)
+        if offset > 0:
+            packets = packets[offset:]
+        if limit is not None:
+            packets = packets[:limit]
+        return packets
+
+    def count_packets(self) -> int:
+        return len(self._load_all())
 
     def get_packet(self, packet_id: str) -> EvidencePacket | None:
         for packet in self._load_all():

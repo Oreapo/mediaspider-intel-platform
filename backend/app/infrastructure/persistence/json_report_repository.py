@@ -11,8 +11,16 @@ class JsonReportRepository(ReportRepository):
     def __init__(self, storage_file: Path):
         self.storage_file = storage_file
 
-    def list_reports(self) -> list[Report]:
-        return sorted(self._load_all(), key=lambda report: report.updated_at, reverse=True)
+    def list_reports(self, *, limit: int | None = None, offset: int = 0) -> list[Report]:
+        reports = sorted(self._load_all(), key=lambda report: report.updated_at, reverse=True)
+        if offset > 0:
+            reports = reports[offset:]
+        if limit is not None:
+            reports = reports[:limit]
+        return reports
+
+    def count_reports(self) -> int:
+        return len(self._load_all())
 
     def get_report(self, report_id: str) -> Report | None:
         for report in self._load_all():

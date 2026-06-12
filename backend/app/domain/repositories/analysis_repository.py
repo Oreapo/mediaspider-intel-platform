@@ -7,7 +7,11 @@ from ..models.analysis import AnalysisJob, AnalysisOutput
 
 class AnalysisRepository(ABC):
     @abstractmethod
-    def list_jobs(self) -> list[AnalysisJob]:
+    def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[AnalysisJob]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_jobs(self) -> int:
         raise NotImplementedError
 
     @abstractmethod

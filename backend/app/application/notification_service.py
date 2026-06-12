@@ -184,6 +184,28 @@ class NotificationService:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[NotificationDelivery]:
+        deliveries, _ = self.search_delivery_page(
+            rule_id=rule_id,
+            status=status,
+            channel=channel,
+            target_type=target_type,
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
+        return deliveries
+
+    def search_delivery_page(
+        self,
+        *,
+        rule_id: str | None = None,
+        status: NotificationDeliveryStatus | None = None,
+        channel: NotificationChannel | None = None,
+        target_type: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[NotificationDelivery], int]:
         deliveries = self.repository.list_deliveries()
         normalized_query = query.strip().lower()
         normalized_target_type = target_type.strip().lower()
@@ -202,11 +224,12 @@ class NotificationService:
                 continue
             filtered.append(delivery)
 
+        total = len(filtered)
         if offset:
             filtered = filtered[offset:]
         if limit is not None:
             filtered = filtered[:limit]
-        return filtered
+        return filtered, total
 
     def run_scheduled_digests(self, now: datetime | None = None) -> dict[str, Any]:
         current = now or datetime.utcnow()

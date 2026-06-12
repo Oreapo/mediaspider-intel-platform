@@ -77,7 +77,7 @@ def list_notification_deliveries(
     offset: int = Query(default=0, ge=0),
     service: NotificationService = Depends(get_notification_service),
 ):
-    deliveries = service.search_deliveries(
+    deliveries, total = service.search_delivery_page(
         rule_id=rule_id,
         status=status,
         channel=channel,
@@ -88,7 +88,7 @@ def list_notification_deliveries(
     )
     return {
         "deliveries": [delivery.model_dump(mode="json") for delivery in deliveries],
-        "total": len(deliveries),
+        "total": total,
     }
 
 

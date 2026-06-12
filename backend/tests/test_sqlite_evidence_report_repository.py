@@ -43,6 +43,9 @@ def test_sqlite_evidence_repository_crud_and_ordering(tmp_path):
 
     assert repository.get_packet("evp_first") == first
     assert [item.id for item in repository.list_packets()] == ["evp_second", "evp_first"]
+    assert repository.count_packets() == 2
+    assert [item.id for item in repository.list_packets(limit=1)] == ["evp_second"]
+    assert [item.id for item in repository.list_packets(offset=1)] == ["evp_first"]
 
     updated = first.model_copy(update={"packet_name": "Updated Packet", "updated_at": now + timedelta(minutes=2)})
     repository.save_packet(updated)
@@ -84,6 +87,9 @@ def test_sqlite_report_repository_crud_and_ordering(tmp_path):
 
     assert repository.get_report("rpt_first") == first
     assert [item.id for item in repository.list_reports()] == ["rpt_second", "rpt_first"]
+    assert repository.count_reports() == 2
+    assert [item.id for item in repository.list_reports(limit=1)] == ["rpt_second"]
+    assert [item.id for item in repository.list_reports(offset=1)] == ["rpt_first"]
 
     updated = first.model_copy(update={"status": ReportStatus.ARCHIVED, "updated_at": now + timedelta(minutes=2)})
     repository.save_report(updated)

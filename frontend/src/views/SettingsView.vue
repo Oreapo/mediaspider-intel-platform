@@ -18,6 +18,7 @@ import {
 import AppAlert from '../components/ui/AppAlert.vue'
 import FieldError from '../components/ui/FieldError.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
+import PaginationBar from '../components/ui/PaginationBar.vue'
 import PermissionGate from '../components/ui/PermissionGate.vue'
 import { useNotifications } from '../composables/useNotifications'
 import { usePlatformModels } from '../composables/usePlatformModels'
@@ -35,8 +36,10 @@ import type { PlatformProfileDiagnostics } from '../types'
 const {
   rules,
   deliveries,
+  deliveryTotal,
   deliveryQuery,
   inbox,
+  inboxTotal,
   inboxQuery,
   unreadCount,
   isLoading,
@@ -100,8 +103,6 @@ const inboxFilters = ref({
   q: '',
   unread_only: false,
 })
-const deliveryPage = computed(() => Math.floor((deliveryQuery.value.offset || 0) / 20) + 1)
-const inboxPage = computed(() => Math.floor((inboxQuery.value.offset || 0) / 20) + 1)
 const selectedChannels = computed(() => parseList(form.value.channels))
 const usesEmail = computed(() => selectedChannels.value.includes('email'))
 const usesWebhook = computed(() => selectedChannels.value.includes('webhook'))
@@ -124,7 +125,7 @@ const stats = computed(() => [
   { label: '规则', value: rules.value.length },
   { label: '已启用', value: rules.value.filter((item) => item.enabled).length },
   { label: '未读', value: unreadCount.value },
-  { label: '投递', value: deliveries.value.length },
+  { label: '投递', value: deliveryTotal.value },
 ])
 
 function parseList(text: string) {
@@ -372,10 +373,8 @@ async function resetDeliveryFilters() {
   await updateDeliveryQuery({ limit: 20, offset: 0, q: '', status: '', channel: '', target_type: '' })
 }
 
-async function moveDeliveryPage(direction: number) {
-  const currentOffset = deliveryQuery.value.offset || 0
-  const nextOffset = Math.max(0, currentOffset + direction * 20)
-  await updateDeliveryQuery({ offset: nextOffset })
+async function moveDeliveryPage(offset: number) {
+  await updateDeliveryQuery({ offset })
 }
 
 async function retryDelivery(deliveryId: string) {
@@ -425,10 +424,8 @@ async function markAllRead() {
   }
 }
 
-async function moveInboxPage(direction: number) {
-  const currentOffset = inboxQuery.value.offset || 0
-  const nextOffset = Math.max(0, currentOffset + direction * 20)
-  await updateInboxQuery({ offset: nextOffset })
+async function moveInboxPage(offset: number) {
+  await updateInboxQuery({ offset })
 }
 </script>
 
@@ -757,15 +754,13 @@ async function moveInboxPage(direction: number) {
         <div v-if="!inbox.length" class="muted">暂无站内通知。</div>
       </div>
 
-      <div class="pager">
-        <button class="secondary-button" :disabled="(inboxQuery.offset || 0) === 0" type="button" @click="moveInboxPage(-1)">
-          上一页
-        </button>
-        <span>第 {{ inboxPage }} 页</span>
-        <button class="secondary-button" :disabled="inbox.length < 20" type="button" @click="moveInboxPage(1)">
-          下一页
-        </button>
-      </div>
+      <PaginationBar
+        :total="inboxTotal"
+        :limit="inboxQuery.limit || 20"
+        :offset="inboxQuery.offset || 0"
+        :loading="isLoading"
+        @change="moveInboxPage"
+      />
     </section>
 
     <div class="split-grid">
@@ -825,15 +820,13 @@ async function moveInboxPage(direction: number) {
           <div v-if="!deliveries.length" class="muted">暂无投递记录。</div>
         </div>
 
-        <div class="pager">
-          <button class="secondary-button" :disabled="(deliveryQuery.offset || 0) === 0" type="button" @click="moveDeliveryPage(-1)">
-            上一页
-          </button>
-          <span>第 {{ deliveryPage }} 页</span>
-          <button class="secondary-button" :disabled="deliveries.length < 20" type="button" @click="moveDeliveryPage(1)">
-            下一页
-          </button>
-        </div>
+        <PaginationBar
+          :total="deliveryTotal"
+          :limit="deliveryQuery.limit || 20"
+          :offset="deliveryQuery.offset || 0"
+          :loading="isLoading"
+          @change="moveDeliveryPage"
+        />
       </section>
 
       <section class="surface section-card">
@@ -1067,16 +1060,6 @@ async function moveInboxPage(direction: number) {
   background:
     linear-gradient(90deg, color-mix(in oklch, var(--primary) 8%, white), rgba(255, 255, 255, 0.86)),
     rgba(239, 246, 255, 0.9);
-}
-
-.pager {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-top: 16px;
-  color: #475569;
-  font-weight: 700;
 }
 
 .primary-button,

@@ -6,21 +6,26 @@ import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
+import PaginationBar from '../components/ui/PaginationBar.vue'
 import PermissionGate from '../components/ui/PermissionGate.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useAnalysisJobs } from '../composables/useAnalysisJobs'
 import { useDatasets } from '../composables/useDatasets'
 import { useI18n } from '../composables/useI18n'
+import { lastPageOffset } from '../lib/pagination'
 import { parseJsonObject, required, type ValidationErrors } from '../lib/validation'
 import type { AnalysisOutput } from '../types'
 
 const { t } = useI18n()
+const jobLimit = 12
+const jobOffset = ref(0)
 const {
   items: jobItems,
+  total: jobTotal,
   isLoading: jobsLoading,
   error: jobsError,
   fetchItems: fetchJobs,
-} = useAnalysisJobs()
+} = useAnalysisJobs({ limit: jobLimit, offset: 0 })
 const { items: datasetItems } = useDatasets()
 
 const form = ref({
@@ -38,11 +43,29 @@ const fieldErrors = ref<ValidationErrors>({})
 
 const selectedJob = computed(() => jobItems.value.find((item) => item.id === selectedJobId.value))
 const analysisStats = computed(() => [
-  { label: t('analysis.jobsTitle'), value: jobItems.value.length },
+  { label: t('analysis.jobsTitle'), value: jobTotal.value },
   { label: t('enum.succeeded'), value: jobItems.value.filter((item) => item.status === 'succeeded').length },
   { label: t('enum.running'), value: jobItems.value.filter((item) => item.status === 'running').length },
   { label: t('analysis.outputsTitle'), value: outputs.value.length },
 ])
+
+async function fetchJobPage(offset = jobOffset.value) {
+  jobOffset.value = offset
+  await fetchJobs({ limit: jobLimit, offset })
+  const normalizedOffset = lastPageOffset(jobTotal.value, jobLimit)
+  if (jobOffset.value > normalizedOffset) {
+    jobOffset.value = normalizedOffset
+    if (jobTotal.value > 0) {
+      await fetchJobs({ limit: jobLimit, offset: normalizedOffset })
+    }
+  }
+}
+
+async function changeJobPage(offset: number) {
+  selectedJobId.value = ''
+  outputs.value = []
+  await fetchJobPage(offset)
+}
 
 function validateAnalysisForm() {
   const errors: ValidationErrors = {}
@@ -80,7 +103,7 @@ async function submitAnalysisJob() {
     })
     message.value = t('analysis.createdMessage')
     selectedJobId.value = job.id
-    await fetchJobs()
+    await fetchJobPage(0)
     outputs.value = await getAnalysisOutputs(job.id)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -220,6 +243,13 @@ function scopeLabel(value: string) {
                 </div>
               </article>
               <EmptyState v-if="!jobItems.length" :title="t('analysis.noJobsTitle')" :description="t('analysis.noJobsDescription')" />
+              <PaginationBar
+                :total="jobTotal"
+                :limit="jobLimit"
+                :offset="jobOffset"
+                :loading="jobsLoading"
+                @change="changeJobPage"
+              />
             </div>
           </BaseSection>
 

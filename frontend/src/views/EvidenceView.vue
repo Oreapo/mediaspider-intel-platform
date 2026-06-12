@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import {
   deleteEvidencePacket,
-  evidenceDownloadUrl,
+  downloadEvidencePacket,
   generateEvidencePacket,
   getEvidencePacket,
 } from '../api/evidence'
@@ -11,21 +11,26 @@ import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
+import PaginationBar from '../components/ui/PaginationBar.vue'
 import PermissionGate from '../components/ui/PermissionGate.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useCases } from '../composables/useCases'
 import { useEvidencePackets } from '../composables/useEvidencePackets'
 import { useI18n } from '../composables/useI18n'
 import { requestConfirm } from '../lib/confirm'
+import { lastPageOffset } from '../lib/pagination'
 import { required, type ValidationErrors } from '../lib/validation'
 import type { EvidencePacket } from '../types'
 
+const packetLimit = 12
+const packetOffset = ref(0)
 const {
   items: packetItems,
+  total: packetTotal,
   isLoading: packetsLoading,
   error: packetsError,
   fetchItems: fetchPackets,
-} = useEvidencePackets()
+} = useEvidencePackets({ limit: packetLimit, offset: 0 })
 const { items: caseItems } = useCases()
 const { t } = useI18n()
 
@@ -35,12 +40,13 @@ const form = ref({
 })
 const selectedPacket = ref<EvidencePacket | null>(null)
 const busy = ref(false)
+const downloadingPacketId = ref('')
 const message = ref('')
 const error = ref('')
 const formErrors = ref<ValidationErrors>({})
 
 const packetStats = computed(() => [
-  { label: t('evidence.statsPackets'), value: packetItems.value.length },
+  { label: t('evidence.statsPackets'), value: packetTotal.value },
   { label: t('evidence.statsCases'), value: new Set(packetItems.value.map((item) => item.case_id)).size },
   { label: t('evidence.statsWithArtifact'), value: packetItems.value.filter((item) => item.storage_uri).length },
   { label: t('evidence.statsLatest'), value: packetItems.value[0]?.packet_name || '-' },
@@ -54,6 +60,23 @@ function manifestSummary(packet: EvidencePacket | null) {
 function sourceRecords(packet: EvidencePacket | null) {
   const records = packet?.manifest_json.source_records
   return Array.isArray(records) ? (records as Array<Record<string, unknown>>) : []
+}
+
+async function fetchPacketPage(offset = packetOffset.value) {
+  packetOffset.value = offset
+  await fetchPackets({ limit: packetLimit, offset })
+  const normalizedOffset = lastPageOffset(packetTotal.value, packetLimit)
+  if (packetOffset.value > normalizedOffset) {
+    packetOffset.value = normalizedOffset
+    if (packetTotal.value > 0) {
+      await fetchPackets({ limit: packetLimit, offset: normalizedOffset })
+    }
+  }
+}
+
+async function changePacketPage(offset: number) {
+  selectedPacket.value = null
+  await fetchPacketPage(offset)
 }
 
 function validatePacketForm() {
@@ -84,7 +107,7 @@ async function submitPacket() {
     })
     message.value = t('evidence.generatedMessage')
     form.value.packet_name = ''
-    await fetchPackets()
+    await fetchPacketPage(0)
     selectedPacket.value = packet
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -103,6 +126,19 @@ async function inspectPacket(packetId: string) {
   }
 }
 
+async function downloadPacket(packetId: string) {
+  message.value = ''
+  error.value = ''
+  downloadingPacketId.value = packetId
+  try {
+    await downloadEvidencePacket(packetId)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    downloadingPacketId.value = ''
+  }
+}
+
 async function removePacket(packetId: string) {
   const confirmed = await requestConfirm({
     title: t('evidence.deleteTitle'),
@@ -117,7 +153,7 @@ async function removePacket(packetId: string) {
     await deleteEvidencePacket(packetId, true)
     message.value = t('evidence.deletedMessage')
     if (selectedPacket.value?.id === packetId) selectedPacket.value = null
-    await fetchPackets()
+    await fetchPacketPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
@@ -184,13 +220,27 @@ async function removePacket(packetId: string) {
               <code class="packet-id">{{ item.id }}</code>
               <div class="actions">
                 <button class="secondary-button" type="button" @click="inspectPacket(item.id)">{{ t('cases.view') }}</button>
-                <a class="secondary-button" :href="evidenceDownloadUrl(item.id)" target="_blank">{{ t('cases.download') }}</a>
+                <button
+                  class="secondary-button"
+                  type="button"
+                  :disabled="downloadingPacketId === item.id"
+                  @click="downloadPacket(item.id)"
+                >
+                  {{ t('cases.download') }}
+                </button>
                 <PermissionGate area="analysis" compact>
                   <button class="secondary-button destructive" type="button" @click="removePacket(item.id)">{{ t('cases.delete') }}</button>
                 </PermissionGate>
               </div>
             </article>
             <EmptyState v-if="!packetItems.length" :title="t('evidence.emptyTitle')" :description="t('evidence.emptyDescription')" />
+            <PaginationBar
+              :total="packetTotal"
+              :limit="packetLimit"
+              :offset="packetOffset"
+              :loading="packetsLoading"
+              @change="changePacketPage"
+            />
           </div>
         </BaseSection>
 

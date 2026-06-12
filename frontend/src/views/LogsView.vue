@@ -5,6 +5,7 @@ import AppAlert from '../components/ui/AppAlert.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
+import PaginationBar from '../components/ui/PaginationBar.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useI18n } from '../composables/useI18n'
 import type { AuditEvent, RunLogDetail, RunLogEntry } from '../types'
@@ -12,6 +13,9 @@ import type { AuditEvent, RunLogDetail, RunLogEntry } from '../types'
 const { t } = useI18n()
 const entries = ref<RunLogEntry[]>([])
 const auditEvents = ref<AuditEvent[]>([])
+const auditTotal = ref(0)
+const auditOffset = ref(0)
+const auditLimit = 25
 const selected = ref<RunLogDetail | null>(null)
 const activeTab = ref<'runs' | 'audit'>('runs')
 const isLoading = ref(false)
@@ -72,16 +76,27 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-async function fetchAuditEvents() {
+async function fetchAuditEvents(offset = auditOffset.value) {
   isLoadingAudit.value = true
   auditError.value = ''
   try {
-    auditEvents.value = await listAuditEvents(auditFilters.value)
+    const result = await listAuditEvents({
+      ...auditFilters.value,
+      limit: auditLimit,
+      offset,
+    })
+    auditEvents.value = result.events
+    auditTotal.value = result.total
+    auditOffset.value = offset
   } catch (err) {
     auditError.value = err instanceof Error ? err.message : String(err)
   } finally {
     isLoadingAudit.value = false
   }
+}
+
+async function applyAuditFilters() {
+  await fetchAuditEvents(0)
 }
 
 async function clearAuditFilters() {
@@ -94,7 +109,11 @@ async function clearAuditFilters() {
     createdFrom: '',
     createdTo: '',
   }
-  await fetchAuditEvents()
+  await fetchAuditEvents(0)
+}
+
+async function moveAuditPage(offset: number) {
+  await fetchAuditEvents(offset)
 }
 
 function runTone(status: string) {
@@ -153,7 +172,7 @@ onMounted(() => {
         </div>
         <div class="stat-item">
           <span>{{ t('logs.auditEvents') }}</span>
-          <strong>{{ auditEvents.length }}</strong>
+          <strong>{{ auditTotal }}</strong>
         </div>
       </div>
 
@@ -197,7 +216,7 @@ onMounted(() => {
     </section>
 
     <BaseSection v-else :title="t('logs.auditTitle')" :description="t('logs.auditDescription')">
-      <form class="audit-filter" @submit.prevent="fetchAuditEvents">
+      <form class="audit-filter" @submit.prevent="applyAuditFilters">
         <input v-model="auditFilters.q" :placeholder="t('logs.auditSearchPlaceholder')" />
         <input v-model="auditFilters.targetType" :placeholder="t('logs.targetTypePlaceholder')" />
         <input v-model="auditFilters.targetId" :placeholder="t('logs.targetIdPlaceholder')" />
@@ -224,6 +243,13 @@ onMounted(() => {
           </div>
         </article>
         <EmptyState v-if="!auditEvents.length" :title="t('logs.noAuditTitle')" :description="t('logs.noAuditDescription')" />
+        <PaginationBar
+          :total="auditTotal"
+          :limit="auditLimit"
+          :offset="auditOffset"
+          :loading="isLoadingAudit"
+          @change="moveAuditPage"
+        />
       </div>
     </BaseSection>
   </section>

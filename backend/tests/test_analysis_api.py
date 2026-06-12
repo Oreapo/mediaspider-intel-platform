@@ -65,5 +65,25 @@ def test_analysis_job_generates_outputs(tmp_path):
         assert len(outputs) == 1
         assert outputs[0]["payload_json"]["dataset_name"] == "Weibo Posts"
         assert outputs[0]["payload_json"]["analysis_type"] == "keyword_heatmap"
+
+        second_job = client.post(
+            "/api/analysis/jobs",
+            json={
+                "dataset_id": dataset_id,
+                "analysis_scope": "common",
+                "analysis_type": "summary",
+                "parameters_json": {},
+            },
+        ).json()["job"]
+        first_page = client.get("/api/analysis/jobs", params={"limit": 1, "offset": 0})
+        second_page = client.get("/api/analysis/jobs", params={"limit": 1, "offset": 1})
+        assert first_page.status_code == 200
+        assert first_page.json()["total"] == 2
+        assert second_page.status_code == 200
+        assert second_page.json()["total"] == 2
+        assert {
+            first_page.json()["jobs"][0]["id"],
+            second_page.json()["jobs"][0]["id"],
+        } == {job["id"], second_job["id"]}
     finally:
         set_container(original_container)

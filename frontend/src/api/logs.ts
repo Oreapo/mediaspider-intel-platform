@@ -19,10 +19,13 @@ export async function listAuditEvents(
     q?: string
     createdFrom?: string
     createdTo?: string
+    limit?: number
+    offset?: number
   } = {},
 ) {
   const query = new URLSearchParams()
-  query.set('limit', '100')
+  query.set('limit', String(params.limit ?? 25))
+  query.set('offset', String(params.offset ?? 0))
   if (params.targetType) query.set('target_type', params.targetType)
   if (params.targetId) query.set('target_id', params.targetId)
   if (params.actorUsername) query.set('actor_username', params.actorUsername)
@@ -30,6 +33,5 @@ export async function listAuditEvents(
   if (params.q) query.set('q', params.q)
   if (params.createdFrom) query.set('created_from', params.createdFrom)
   if (params.createdTo) query.set('created_to', params.createdTo)
-  const response = await http.get<{ events: AuditEvent[] }>(`/logs/audit?${query.toString()}`)
-  return response.events
+  return http.get<{ events: AuditEvent[]; total: number }>(`/logs/audit?${query.toString()}`)
 }
