@@ -87,6 +87,7 @@ def test_sqlite_dataset_repository_filters_counts_and_paginates(tmp_path):
             dataset_name="XHS Lead Notes",
             dataset_type=DatasetType.RAW,
             source_platform=PlatformKey.XHS,
+            source_task_id="task_xhs",
             scenario_type=ScenarioType.LEAD_DIVERSION,
             storage_uri="xhs_100%_leads.jsonl",
             tags=["lead", "spring"],
@@ -98,6 +99,7 @@ def test_sqlite_dataset_repository_filters_counts_and_paginates(tmp_path):
             dataset_name="DY Topic Videos",
             dataset_type=DatasetType.ANALYSIS_READY,
             source_platform=PlatformKey.DY,
+            source_task_id="task_topic",
             scenario_type=ScenarioType.TOPIC_WATCH,
             storage_uri="dy_topics.jsonl",
             tags=["topic", "video"],
@@ -109,6 +111,7 @@ def test_sqlite_dataset_repository_filters_counts_and_paginates(tmp_path):
             dataset_name="Xianyu Product Risk",
             dataset_type=DatasetType.NORMALIZED,
             source_platform=PlatformKey.XIANYU,
+            source_task_id="task_xianyu",
             scenario_type=ScenarioType.PRODUCT_RISK,
             storage_uri="xianyu_products.jsonl",
             tags=["seller", "price"],
@@ -123,6 +126,8 @@ def test_sqlite_dataset_repository_filters_counts_and_paginates(tmp_path):
     assert [item.id for item in repository.list_datasets(tag="PRICE")] == ["ds_xianyu"]
     assert [item.id for item in repository.list_datasets(query="dy_topics")] == ["ds_dy"]
     assert [item.id for item in repository.list_datasets(query="100%")] == ["ds_xhs"]
+    assert [item.id for item in repository.list_datasets(source_task_id="task_topic")] == ["ds_dy"]
     assert repository.count_datasets(scenario_type=ScenarioType.TOPIC_WATCH) == 1
+    assert repository.count_datasets(source_task_id="task_xhs") == 1
     assert [item.id for item in repository.list_datasets(limit=1, offset=1)] == ["ds_dy"]
     assert repository.count_datasets() == 3

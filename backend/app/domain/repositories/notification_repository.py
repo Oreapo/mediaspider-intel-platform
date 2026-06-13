@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..models.notification import NotificationDelivery, NotificationRule
+from ..models.notification import (
+    NotificationChannel,
+    NotificationDelivery,
+    NotificationDeliveryStatus,
+    NotificationRule,
+)
 
 
 class NotificationRepository(ABC):
@@ -23,7 +28,37 @@ class NotificationRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_deliveries(self) -> list[NotificationDelivery]:
+    def list_deliveries(
+        self,
+        *,
+        rule_id: str | None = None,
+        status: NotificationDeliveryStatus | None = None,
+        channel: NotificationChannel | None = None,
+        target_type: str = "",
+        target_id: str = "",
+        is_read: bool | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[NotificationDelivery]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_deliveries(
+        self,
+        *,
+        rule_id: str | None = None,
+        status: NotificationDeliveryStatus | None = None,
+        channel: NotificationChannel | None = None,
+        target_type: str = "",
+        target_id: str = "",
+        is_read: bool | None = None,
+        query: str = "",
+    ) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_delivery(self, delivery_id: str) -> NotificationDelivery | None:
         raise NotImplementedError
 
     @abstractmethod

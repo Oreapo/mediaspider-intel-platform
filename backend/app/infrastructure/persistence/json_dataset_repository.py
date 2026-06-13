@@ -19,6 +19,7 @@ class JsonDatasetRepository(DatasetRepository):
         source_platform: PlatformKey | None = None,
         dataset_type: DatasetType | None = None,
         scenario_type: ScenarioType | None = None,
+        source_task_id: str = "",
         tag: str = "",
         query: str = "",
         limit: int | None = None,
@@ -28,6 +29,7 @@ class JsonDatasetRepository(DatasetRepository):
             source_platform=source_platform,
             dataset_type=dataset_type,
             scenario_type=scenario_type,
+            source_task_id=source_task_id,
             tag=tag,
             query=query,
         )
@@ -43,6 +45,7 @@ class JsonDatasetRepository(DatasetRepository):
         source_platform: PlatformKey | None = None,
         dataset_type: DatasetType | None = None,
         scenario_type: ScenarioType | None = None,
+        source_task_id: str = "",
         tag: str = "",
         query: str = "",
     ) -> int:
@@ -51,6 +54,7 @@ class JsonDatasetRepository(DatasetRepository):
                 source_platform=source_platform,
                 dataset_type=dataset_type,
                 scenario_type=scenario_type,
+                source_task_id=source_task_id,
                 tag=tag,
                 query=query,
             )
@@ -89,6 +93,7 @@ class JsonDatasetRepository(DatasetRepository):
         source_platform: PlatformKey | None,
         dataset_type: DatasetType | None,
         scenario_type: ScenarioType | None,
+        source_task_id: str,
         tag: str,
         query: str,
     ) -> list[Dataset]:
@@ -99,6 +104,13 @@ class JsonDatasetRepository(DatasetRepository):
             datasets = [dataset for dataset in datasets if dataset.dataset_type == dataset_type]
         if scenario_type:
             datasets = [dataset for dataset in datasets if dataset.scenario_type == scenario_type]
+        normalized_source_task_id = source_task_id.strip()
+        if normalized_source_task_id:
+            datasets = [
+                dataset
+                for dataset in datasets
+                if dataset.source_task_id == normalized_source_task_id
+            ]
         tag_needle = tag.strip().lower()
         if tag_needle:
             datasets = [

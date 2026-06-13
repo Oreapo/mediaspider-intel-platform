@@ -82,3 +82,21 @@ class AuditService:
             metadata_json=metadata_json or {},
         )
         return self.repository.save_event(event)
+
+    def record_system(
+        self,
+        *,
+        action: str,
+        target_type: str,
+        target_id: str,
+        summary: str,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> AuditEvent:
+        return self.record(
+            action=action,
+            actor=AuthUser(username="system", role="system", display_name="System"),
+            target_type=target_type,
+            target_id=target_id,
+            summary=summary,
+            metadata_json=metadata_json,
+        )

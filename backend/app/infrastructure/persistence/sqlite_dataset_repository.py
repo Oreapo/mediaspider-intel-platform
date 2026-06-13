@@ -24,6 +24,7 @@ class SQLiteDatasetRepository(DatasetRepository):
         source_platform: PlatformKey | None = None,
         dataset_type: DatasetType | None = None,
         scenario_type: ScenarioType | None = None,
+        source_task_id: str = "",
         tag: str = "",
         query: str = "",
         limit: int | None = None,
@@ -33,6 +34,7 @@ class SQLiteDatasetRepository(DatasetRepository):
             source_platform=source_platform,
             dataset_type=dataset_type,
             scenario_type=scenario_type,
+            source_task_id=source_task_id,
             tag=tag,
             query=query,
         )
@@ -55,6 +57,7 @@ class SQLiteDatasetRepository(DatasetRepository):
         source_platform: PlatformKey | None = None,
         dataset_type: DatasetType | None = None,
         scenario_type: ScenarioType | None = None,
+        source_task_id: str = "",
         tag: str = "",
         query: str = "",
     ) -> int:
@@ -62,6 +65,7 @@ class SQLiteDatasetRepository(DatasetRepository):
             source_platform=source_platform,
             dataset_type=dataset_type,
             scenario_type=scenario_type,
+            source_task_id=source_task_id,
             tag=tag,
             query=query,
         )
@@ -172,6 +176,9 @@ class SQLiteDatasetRepository(DatasetRepository):
                 "CREATE INDEX IF NOT EXISTS idx_datasets_scenario_type ON datasets (scenario_type)"
             )
             connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_datasets_source_task_id ON datasets (source_task_id)"
+            )
+            connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_datasets_updated_at ON datasets (updated_at DESC)"
             )
             connection.commit()
@@ -207,6 +214,7 @@ class SQLiteDatasetRepository(DatasetRepository):
         source_platform: PlatformKey | None,
         dataset_type: DatasetType | None,
         scenario_type: ScenarioType | None,
+        source_task_id: str,
         tag: str,
         query: str,
     ) -> tuple[str, list[Any]]:
@@ -221,6 +229,10 @@ class SQLiteDatasetRepository(DatasetRepository):
         if scenario_type:
             clauses.append("scenario_type = ?")
             parameters.append(scenario_type.value)
+        normalized_source_task_id = source_task_id.strip()
+        if normalized_source_task_id:
+            clauses.append("source_task_id = ?")
+            parameters.append(normalized_source_task_id)
         tag_needle = tag.strip().lower()
         if tag_needle:
             clauses.append(

@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ...domain.models.notification import NotificationDelivery, NotificationRule
+from ...domain.models.notification import (
+    NotificationChannel,
+    NotificationDelivery,
+    NotificationDeliveryStatus,
+    NotificationRule,
+)
 from ...domain.repositories.notification_repository import NotificationRepository
 
 
@@ -42,8 +47,62 @@ class JsonNotificationRepository(NotificationRepository):
         self._save_rules(filtered)
         return True
 
-    def list_deliveries(self) -> list[NotificationDelivery]:
-        return sorted(self._load_deliveries(), key=lambda delivery: delivery.created_at, reverse=True)
+    def list_deliveries(
+        self,
+        *,
+        rule_id: str | None = None,
+        status: NotificationDeliveryStatus | None = None,
+        channel: NotificationChannel | None = None,
+        target_type: str = "",
+        target_id: str = "",
+        is_read: bool | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[NotificationDelivery]:
+        deliveries = self._filtered_deliveries(
+            rule_id=rule_id,
+            status=status,
+            channel=channel,
+            target_type=target_type,
+            target_id=target_id,
+            is_read=is_read,
+            query=query,
+        )
+        if offset > 0:
+            deliveries = deliveries[offset:]
+        if limit is not None:
+            deliveries = deliveries[:limit]
+        return deliveries
+
+    def count_deliveries(
+        self,
+        *,
+        rule_id: str | None = None,
+        status: NotificationDeliveryStatus | None = None,
+        channel: NotificationChannel | None = None,
+        target_type: str = "",
+        target_id: str = "",
+        is_read: bool | None = None,
+        query: str = "",
+    ) -> int:
+        return len(
+            self._filtered_deliveries(
+                rule_id=rule_id,
+                status=status,
+                channel=channel,
+                target_type=target_type,
+                target_id=target_id,
+                is_read=is_read,
+                query=query,
+            )
+        )
+
+    def get_delivery(self, delivery_id: str) -> NotificationDelivery | None:
+        for delivery in self._load_deliveries():
+            if delivery.id == delivery_id:
+                return delivery
+        return None
 
     def save_delivery(self, delivery: NotificationDelivery) -> NotificationDelivery:
         deliveries = self._load_deliveries()
@@ -63,6 +122,59 @@ class JsonNotificationRepository(NotificationRepository):
 
     def _load_deliveries(self) -> list[NotificationDelivery]:
         return self._load_model_list(self.deliveries_file, NotificationDelivery)
+
+    def _filtered_deliveries(
+        self,
+        *,
+        rule_id: str | None,
+        status: NotificationDeliveryStatus | None,
+        channel: NotificationChannel | None,
+        target_type: str,
+        target_id: str,
+        is_read: bool | None,
+        query: str,
+    ) -> list[NotificationDelivery]:
+        deliveries = sorted(self._load_deliveries(), key=lambda delivery: delivery.created_at, reverse=True)
+        normalized_target_type = target_type.strip().lower()
+        normalized_target_id = target_id.strip()
+        needle = query.strip().lower()
+        if rule_id:
+            deliveries = [delivery for delivery in deliveries if delivery.rule_id == rule_id]
+        if status:
+            deliveries = [delivery for delivery in deliveries if delivery.status == status]
+        if channel:
+            deliveries = [delivery for delivery in deliveries if delivery.channel == channel]
+        if normalized_target_type:
+            deliveries = [
+                delivery for delivery in deliveries if delivery.target_type.lower() == normalized_target_type
+            ]
+        if normalized_target_id:
+            deliveries = [delivery for delivery in deliveries if delivery.target_id == normalized_target_id]
+        if is_read is not None:
+            deliveries = [
+                delivery for delivery in deliveries if self._is_delivery_read(delivery) is is_read
+            ]
+        if needle:
+            deliveries = [delivery for delivery in deliveries if needle in self._delivery_search_text(delivery)]
+        return deliveries
+
+    def _is_delivery_read(self, delivery: NotificationDelivery) -> bool:
+        inbox = delivery.payload_json.get("_inbox")
+        return isinstance(inbox, dict) and bool(inbox.get("read_at"))
+
+    def _delivery_search_text(self, delivery: NotificationDelivery) -> str:
+        return " ".join(
+            [
+                delivery.id,
+                delivery.rule_id,
+                delivery.target_type,
+                delivery.target_id,
+                delivery.channel.value,
+                delivery.status.value,
+                delivery.error_message,
+                json.dumps(delivery.payload_json, ensure_ascii=False, sort_keys=True),
+            ]
+        ).lower()
 
     def _load_model_list(self, path: Path, model_class):
         if not path.exists():

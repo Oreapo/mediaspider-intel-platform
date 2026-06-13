@@ -15,17 +15,35 @@ class AnalysisService:
         self.repository = repository
         self.dataset_service = dataset_service
 
-    def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[AnalysisJob]:
-        return self.repository.list_jobs(limit=limit, offset=offset)
+    def list_jobs(
+        self,
+        *,
+        dataset_id: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[AnalysisJob]:
+        return self.repository.list_jobs(dataset_id=dataset_id, limit=limit, offset=offset)
 
-    def list_jobs_page(self, *, limit: int | None = None, offset: int = 0) -> tuple[list[AnalysisJob], int]:
-        return self.repository.list_jobs(limit=limit, offset=offset), self.repository.count_jobs()
+    def list_jobs_page(
+        self,
+        *,
+        dataset_id: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[AnalysisJob], int]:
+        return (
+            self.repository.list_jobs(dataset_id=dataset_id, limit=limit, offset=offset),
+            self.repository.count_jobs(dataset_id=dataset_id),
+        )
 
     def get_job(self, job_id: str) -> AnalysisJob | None:
         return self.repository.get_job(job_id)
 
     def get_outputs(self, job_id: str) -> list[AnalysisOutput]:
         return self.repository.list_outputs(job_id)
+
+    def get_outputs_for_jobs(self, job_ids: list[str]) -> list[AnalysisOutput]:
+        return self.repository.list_outputs_for_jobs(job_ids)
 
     def create_job(
         self,

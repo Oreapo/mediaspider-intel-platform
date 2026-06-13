@@ -16,6 +16,7 @@ export interface DatasetListFilters {
   source_platform?: string
   dataset_type?: string
   scenario_type?: string
+  source_task_id?: string
   tag?: string
   q?: string
   limit?: number

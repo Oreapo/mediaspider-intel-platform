@@ -50,10 +50,20 @@ def test_sqlite_analysis_repository_persists_jobs_outputs_and_pages(tmp_path):
         created_at=now,
         updated_at=now,
     )
+    second_output = AnalysisOutput(
+        id="ao_second",
+        analysis_job_id=second.id,
+        output_type="summary",
+        title="Topic map",
+        summary="Running preview",
+        created_at=now + timedelta(minutes=1),
+        updated_at=now + timedelta(minutes=1),
+    )
 
     repository.save_job(first)
     repository.save_job(second)
     repository.save_output(output)
+    repository.save_output(second_output)
 
     assert repository.get_job(first.id) == first
     assert repository.count_jobs() == 2
@@ -61,7 +71,12 @@ def test_sqlite_analysis_repository_persists_jobs_outputs_and_pages(tmp_path):
     assert [item.id for item in repository.list_jobs(limit=1)] == [second.id]
     assert [item.id for item in repository.list_jobs(offset=1)] == [first.id]
     assert repository.list_outputs(first.id) == [output]
-    assert repository.list_outputs(second.id) == []
+    assert repository.list_outputs(second.id) == [second_output]
+    assert repository.list_outputs_for_jobs([first.id, second.id, "missing"]) == [
+        second_output,
+        output,
+    ]
+    assert repository.list_outputs_for_jobs([]) == []
 
     updated = first.model_copy(
         update={
@@ -99,3 +114,42 @@ def test_app_container_uses_sqlite_analysis_repository_in_global_sqlite_mode(tmp
     assert sqlite_path.exists()
     assert container.analysis_service.get_job(job.id) == job
     assert container.analysis_service.get_outputs(job.id) == [output]
+
+
+def test_sqlite_analysis_repository_filters_jobs_by_dataset(tmp_path):
+    repository = SQLiteAnalysisRepository(tmp_path / "storage.sqlite3")
+    now = datetime.utcnow()
+    jobs = [
+        AnalysisJob(
+            id="aj_ds_1_old",
+            dataset_id="ds_1",
+            analysis_scope=AnalysisScope.COMMON,
+            analysis_type="summary",
+            updated_at=now,
+        ),
+        AnalysisJob(
+            id="aj_ds_2",
+            dataset_id="ds_2",
+            analysis_scope=AnalysisScope.PLATFORM,
+            analysis_type="topic_map",
+            updated_at=now + timedelta(minutes=1),
+        ),
+        AnalysisJob(
+            id="aj_ds_1_new",
+            dataset_id="ds_1",
+            analysis_scope=AnalysisScope.CROSS_PLATFORM,
+            analysis_type="network",
+            updated_at=now + timedelta(minutes=2),
+        ),
+    ]
+    for job in jobs:
+        repository.save_job(job)
+
+    assert [job.id for job in repository.list_jobs(dataset_id="ds_1")] == [
+        "aj_ds_1_new",
+        "aj_ds_1_old",
+    ]
+    assert [job.id for job in repository.list_jobs(dataset_id="ds_1", limit=1, offset=1)] == [
+        "aj_ds_1_old"
+    ]
+    assert repository.count_jobs(dataset_id="ds_1") == 2

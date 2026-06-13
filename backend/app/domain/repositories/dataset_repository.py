@@ -15,6 +15,7 @@ class DatasetRepository(ABC):
         source_platform: PlatformKey | None = None,
         dataset_type: DatasetType | None = None,
         scenario_type: ScenarioType | None = None,
+        source_task_id: str = "",
         tag: str = "",
         query: str = "",
         limit: int | None = None,
@@ -29,6 +30,7 @@ class DatasetRepository(ABC):
         source_platform: PlatformKey | None = None,
         dataset_type: DatasetType | None = None,
         scenario_type: ScenarioType | None = None,
+        source_task_id: str = "",
         tag: str = "",
         query: str = "",
     ) -> int:

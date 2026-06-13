@@ -80,6 +80,11 @@ export async function startTaskRun(taskId: string) {
   return response.run
 }
 
+export async function cancelTaskRun(taskId: string, runId: string) {
+  const response = await http.post<{ run: TaskRun }>(`/tasks/${taskId}/runs/${runId}/cancel`)
+  return response.run
+}
+
 export async function runScheduledTasks(executeCrawler = true) {
   return http.post<{
     ran_at: string
@@ -94,8 +99,30 @@ export async function getSchedulerStatus() {
 }
 
 export async function listTaskRuns(taskId: string) {
-  const response = await http.get<{ runs: TaskRun[] }>(`/tasks/${taskId}/runs`)
+  const response = await listTaskRunsPage(taskId)
   return response.runs
+}
+
+export interface TaskRunListResult {
+  runs: TaskRun[]
+  total: number
+  status_counts: {
+    succeeded: number
+    failed: number
+  }
+}
+
+export async function listTaskRunsPage(taskId: string, limit?: number, offset = 0) {
+  const params = new URLSearchParams()
+  if (limit !== undefined) params.set('limit', String(limit))
+  if (offset > 0) params.set('offset', String(offset))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return http.get<TaskRunListResult>(`/tasks/${taskId}/runs${suffix}`)
+}
+
+export async function getTaskRun(taskId: string, runId: string) {
+  const response = await http.get<{ run: TaskRun }>(`/tasks/${taskId}/runs/${runId}`)
+  return response.run
 }
 
 export async function getCrawlerDiagnostics(taskId: string) {

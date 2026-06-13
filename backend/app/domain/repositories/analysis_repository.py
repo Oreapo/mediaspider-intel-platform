@@ -7,11 +7,17 @@ from ..models.analysis import AnalysisJob, AnalysisOutput
 
 class AnalysisRepository(ABC):
     @abstractmethod
-    def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[AnalysisJob]:
+    def list_jobs(
+        self,
+        *,
+        dataset_id: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[AnalysisJob]:
         raise NotImplementedError
 
     @abstractmethod
-    def count_jobs(self) -> int:
+    def count_jobs(self, *, dataset_id: str = "") -> int:
         raise NotImplementedError
 
     @abstractmethod
@@ -24,6 +30,10 @@ class AnalysisRepository(ABC):
 
     @abstractmethod
     def list_outputs(self, job_id: str) -> list[AnalysisOutput]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_outputs_for_jobs(self, job_ids: list[str]) -> list[AnalysisOutput]:
         raise NotImplementedError
 
     @abstractmethod

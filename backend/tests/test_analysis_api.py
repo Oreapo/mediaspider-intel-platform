@@ -13,6 +13,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.api.dependencies import container as current_container, set_container
 from app.api.dependencies.container import AppContainer
+from app.domain.models.analysis import AnalysisJob, AnalysisOutput, AnalysisScope
 from app.main import app
 
 
@@ -85,5 +86,81 @@ def test_analysis_job_generates_outputs(tmp_path):
             first_page.json()["jobs"][0]["id"],
             second_page.json()["jobs"][0]["id"],
         } == {job["id"], second_job["id"]}
+
+        batch_outputs = client.get(
+            "/api/analysis/outputs",
+            params=[("job_ids", job["id"]), ("job_ids", second_job["id"])],
+        )
+        assert batch_outputs.status_code == 200
+        assert {
+            output["analysis_job_id"] for output in batch_outputs.json()["outputs"]
+        } == {job["id"], second_job["id"]}
+    finally:
+        set_container(original_container)
+
+
+def test_analysis_job_list_filters_by_dataset_in_sqlite_mode(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "storage" / "platform.sqlite3"
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", "sqlite")
+    monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", str(sqlite_path))
+    test_container = AppContainer(tmp_path)
+    for job in (
+        AnalysisJob(
+            id="aj_first",
+            dataset_id="ds_target",
+            analysis_scope=AnalysisScope.COMMON,
+            analysis_type="summary",
+        ),
+        AnalysisJob(
+            id="aj_other",
+            dataset_id="ds_other",
+            analysis_scope=AnalysisScope.PLATFORM,
+            analysis_type="topic_map",
+        ),
+        AnalysisJob(
+            id="aj_second",
+            dataset_id="ds_target",
+            analysis_scope=AnalysisScope.CROSS_PLATFORM,
+            analysis_type="network",
+        ),
+    ):
+        test_container.analysis_service.repository.save_job(job)
+    test_container.analysis_service.repository.save_output(
+        AnalysisOutput(
+            id="ao_target",
+            analysis_job_id="aj_first",
+            output_type="summary",
+            title="Target output",
+        )
+    )
+    test_container.analysis_service.repository.save_output(
+        AnalysisOutput(
+            id="ao_other",
+            analysis_job_id="aj_other",
+            output_type="summary",
+            title="Other output",
+        )
+    )
+
+    original_container = current_container
+    set_container(test_container)
+    try:
+        response = TestClient(app).get(
+            "/api/analysis/jobs",
+            params={"dataset_id": "ds_target", "limit": 1, "offset": 1},
+        )
+
+        assert response.status_code == 200
+        assert set(response.json()) == {"jobs", "total"}
+        assert len(response.json()["jobs"]) == 1
+        assert response.json()["jobs"][0]["dataset_id"] == "ds_target"
+        assert response.json()["total"] == 2
+
+        outputs_response = TestClient(app).get(
+            "/api/analysis/outputs",
+            params=[("job_ids", "aj_first"), ("job_ids", "aj_second")],
+        )
+        assert outputs_response.status_code == 200
+        assert [output["id"] for output in outputs_response.json()["outputs"]] == ["ao_target"]
     finally:
         set_container(original_container)

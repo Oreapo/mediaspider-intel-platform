@@ -70,9 +70,9 @@ def create_task(
 
 
 @router.post("/run-scheduled", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
-def run_scheduled_tasks(
+async def run_scheduled_tasks(
     payload: ScheduledTaskRunRequest | None = None,
-    service: CollectionTaskService = Depends(get_task_service),
+    scheduler: BackgroundScheduler = Depends(get_scheduler_service),
     audit_service: AuditService = Depends(get_audit_service),
     actor: AuthUser = Depends(require_roles(*OPERATOR_ROLES)),
 ):
@@ -81,7 +81,14 @@ def run_scheduled_tasks(
         now = datetime.fromisoformat(start_payload.now) if start_payload.now else None
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid now datetime") from exc
-    result = service.run_scheduled_tasks(now=now, execute_crawler=start_payload.execute_crawler)
+    try:
+        result = await scheduler.run_once(
+            now=now,
+            execute_crawler=start_payload.execute_crawler,
+            trigger_type="manual",
+        )
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
     audit_service.record(
         action="task.run_scheduled",
         actor=actor,
@@ -100,9 +107,17 @@ def run_scheduled_tasks(
 @router.get("/scheduler/status")
 def get_scheduler_status(
     scheduler: BackgroundScheduler = Depends(get_scheduler_service),
+    service: CollectionTaskService = Depends(get_task_service),
 ):
     return {
         "is_running": scheduler.is_running,
+        "is_executing": scheduler.is_executing,
+        "queued_runs": scheduler.queued_runs,
+        "active_task_runs": service.active_task_runs,
+        "queued_task_runs": service.queued_task_runs,
+        "max_concurrent_task_runs": service.max_concurrent_runs,
+        "task_queue_timeout_seconds": service.queue_timeout_seconds,
+        "recovered_task_runs": service.recovered_task_runs,
         "interval_seconds": scheduler.interval_seconds,
         "execute_crawler": scheduler.execute_crawler,
         "run_timeout_seconds": scheduler.run_timeout_seconds,
@@ -200,10 +215,20 @@ def disable_task(
 
 
 @router.get("/{task_id}/runs")
-def list_task_runs(task_id: str, service: CollectionTaskService = Depends(get_task_service)):
+def list_task_runs(
+    task_id: str,
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: CollectionTaskService = Depends(get_task_service),
+):
     if service.get_task(task_id) is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    return {"runs": [run.model_dump(mode="json") for run in service.list_runs(task_id)]}
+    result = service.list_runs_page(task_id, limit=limit, offset=offset)
+    return {
+        "runs": [run.model_dump(mode="json") for run in result["runs"]],
+        "total": result["total"],
+        "status_counts": result["status_counts"],
+    }
 
 
 @router.get("/{task_id}/crawler-diagnostics")
@@ -226,6 +251,34 @@ def get_task_run(
     return {"run": run.model_dump(mode="json")}
 
 
+@router.post(
+    "/{task_id}/runs/{run_id}/cancel",
+    dependencies=[Depends(require_roles(*OPERATOR_ROLES))],
+)
+def cancel_task_run(
+    task_id: str,
+    run_id: str,
+    service: CollectionTaskService = Depends(get_task_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    actor: AuthUser = Depends(require_roles(*OPERATOR_ROLES)),
+):
+    try:
+        run = service.cancel_run(task_id, run_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 409
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    audit_service.record(
+        action="task.run_cancel",
+        actor=actor,
+        target_type="task_run",
+        target_id=run.id,
+        summary=f"取消排队中的采集任务运行：{run.id}",
+        metadata_json={"task_id": task_id, "status": run.status.value},
+    )
+    return {"message": "Task run cancelled", "run": run.model_dump(mode="json")}
+
+
 @router.post("/{task_id}/runs", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
 def start_task_run(
     task_id: str,
@@ -243,7 +296,15 @@ def start_task_run(
         )
     except ValueError as exc:
         detail = str(exc)
-        status_code = 404 if "not found" in detail.lower() else 400
+        lowered_detail = detail.lower()
+        if "not found" in lowered_detail:
+            status_code = 404
+        elif "already has active run" in lowered_detail:
+            status_code = 409
+        elif "queue timed out" in lowered_detail:
+            status_code = 503
+        else:
+            status_code = 400
         raise HTTPException(status_code=status_code, detail=detail) from exc
     audit_service.record(
         action="task.run",

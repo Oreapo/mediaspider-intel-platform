@@ -103,3 +103,72 @@ def test_app_container_can_switch_notification_repository_to_sqlite(tmp_path, mo
 
     assert sqlite_path.exists()
     assert container.notification_service.get_rule(rule.id).rule_name == "SQLite Notification"
+
+
+def test_sqlite_notification_repository_filters_counts_and_paginates(tmp_path):
+    repository = SQLiteNotificationRepository(tmp_path / "storage.sqlite3")
+    now = datetime.utcnow()
+    deliveries = [
+        NotificationDelivery(
+            id="nd_sent",
+            rule_id="nr_first",
+            target_type="signal",
+            target_id="sig_100%",
+            channel=NotificationChannel.INTERNAL_INBOX,
+            status=NotificationDeliveryStatus.SENT,
+            payload_json={"summary": "Risk account alpha"},
+            created_at=now,
+            updated_at=now,
+        ),
+        NotificationDelivery(
+            id="nd_failed",
+            rule_id="nr_first",
+            target_type="signal",
+            target_id="sig_failed",
+            channel=NotificationChannel.EMAIL,
+            status=NotificationDeliveryStatus.FAILED,
+            payload_json={"summary": "Email delivery"},
+            error_message="SMTP unavailable",
+            created_at=now + timedelta(minutes=1),
+            updated_at=now + timedelta(minutes=1),
+        ),
+        NotificationDelivery(
+            id="nd_skipped",
+            rule_id="nr_second",
+            target_type="scheduled_digest",
+            target_id="digest_1",
+            channel=NotificationChannel.INTERNAL_INBOX,
+            status=NotificationDeliveryStatus.SKIPPED,
+            payload_json={"reason": "no_matching_events", "_inbox": {"read_at": now.isoformat()}},
+            created_at=now + timedelta(minutes=2),
+            updated_at=now + timedelta(minutes=2),
+        ),
+    ]
+    for delivery in deliveries:
+        repository.save_delivery(delivery)
+
+    assert [item.id for item in repository.list_deliveries(rule_id="nr_first")] == [
+        "nd_failed",
+        "nd_sent",
+    ]
+    assert [item.id for item in repository.list_deliveries(status=NotificationDeliveryStatus.FAILED)] == [
+        "nd_failed"
+    ]
+    assert [item.id for item in repository.list_deliveries(channel=NotificationChannel.EMAIL)] == [
+        "nd_failed"
+    ]
+    assert [item.id for item in repository.list_deliveries(target_type="SIGNAL")] == [
+        "nd_failed",
+        "nd_sent",
+    ]
+    assert [item.id for item in repository.list_deliveries(query="smtp unavailable")] == ["nd_failed"]
+    assert [item.id for item in repository.list_deliveries(query="100%")] == ["nd_sent"]
+    assert [item.id for item in repository.list_deliveries(target_id="sig_failed")] == ["nd_failed"]
+    assert [item.id for item in repository.list_deliveries(is_read=True)] == ["nd_skipped"]
+    assert [item.id for item in repository.list_deliveries(is_read=False)] == ["nd_failed", "nd_sent"]
+    assert [item.id for item in repository.list_deliveries(limit=1, offset=1)] == ["nd_failed"]
+    assert repository.count_deliveries(channel=NotificationChannel.INTERNAL_INBOX) == 2
+    assert repository.count_deliveries(query="no_matching_events") == 1
+    assert repository.count_deliveries(is_read=False) == 2
+    assert repository.get_delivery("nd_failed") == deliveries[1]
+    assert repository.get_delivery("missing") is None

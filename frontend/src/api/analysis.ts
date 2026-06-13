@@ -1,6 +1,8 @@
 import { http } from '../lib/http'
 import type { AnalysisJob, AnalysisOutput } from '../types'
 
+const ANALYSIS_OUTPUT_JOB_BATCH_SIZE = 100
+
 export interface AnalysisJobCreatePayload {
   dataset_id: string
   analysis_scope: string
@@ -9,6 +11,7 @@ export interface AnalysisJobCreatePayload {
 }
 
 export interface AnalysisJobListQuery {
+  dataset_id?: string
   limit?: number
   offset?: number
 }
@@ -44,4 +47,23 @@ export async function createAnalysisJob(payload: AnalysisJobCreatePayload) {
 export async function getAnalysisOutputs(jobId: string) {
   const response = await http.get<{ outputs: AnalysisOutput[] }>(`/analysis/jobs/${jobId}/outputs`)
   return response.outputs
+}
+
+export async function getAnalysisOutputsBatch(jobIds: string[]) {
+  const uniqueJobIds = Array.from(new Set(jobIds.filter(Boolean)))
+  if (!uniqueJobIds.length) return []
+
+  const requests: Array<Promise<AnalysisOutput[]>> = []
+  for (let offset = 0; offset < uniqueJobIds.length; offset += ANALYSIS_OUTPUT_JOB_BATCH_SIZE) {
+    const params = new URLSearchParams()
+    uniqueJobIds
+      .slice(offset, offset + ANALYSIS_OUTPUT_JOB_BATCH_SIZE)
+      .forEach((jobId) => params.append('job_ids', jobId))
+    requests.push(
+      http
+        .get<{ outputs: AnalysisOutput[] }>(`/analysis/outputs?${params.toString()}`)
+        .then((response) => response.outputs),
+    )
+  }
+  return (await Promise.all(requests)).flat()
 }

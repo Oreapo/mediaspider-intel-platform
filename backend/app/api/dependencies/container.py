@@ -78,6 +78,12 @@ class AppContainer:
             self._dataset_service,
             self._crawler_runner,
             self._platform_profile_service.resolve_runtime_auth,
+            max_concurrent_runs=int(os.getenv("MEDIASPIDER_TASK_MAX_CONCURRENT_RUNS", "1")),
+            queue_timeout_seconds=float(os.getenv("MEDIASPIDER_TASK_QUEUE_TIMEOUT_SECONDS", "300")),
+            recover_interrupted_runs=os.getenv(
+                "MEDIASPIDER_TASK_RECOVER_INTERRUPTED_RUNS",
+                "true",
+            ).lower() == "true",
         )
         self._analysis_service = AnalysisService(
             self._analysis_repository,
@@ -120,6 +126,7 @@ class AppContainer:
         )
         self._scheduler_service = BackgroundScheduler(
             self._task_service,
+            self._audit_service,
             interval_seconds=int(os.getenv("MEDIASPIDER_SCHEDULER_INTERVAL_SECONDS", "60")),
             execute_crawler=os.getenv("MEDIASPIDER_SCHEDULER_EXECUTE_CRAWLER", "true").lower() == "true",
         )

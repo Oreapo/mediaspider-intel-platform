@@ -16,9 +16,15 @@ class SQLiteAnalysisRepository(AnalysisRepository):
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[AnalysisJob]:
-        statement = "SELECT * FROM analysis_jobs ORDER BY updated_at DESC"
-        parameters: list[int] = []
+    def list_jobs(
+        self,
+        *,
+        dataset_id: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[AnalysisJob]:
+        where_clause, parameters = self._job_filter_query(dataset_id=dataset_id)
+        statement = f"SELECT * FROM analysis_jobs{where_clause} ORDER BY updated_at DESC"
         if limit is not None:
             statement += " LIMIT ?"
             parameters.append(limit)
@@ -31,9 +37,13 @@ class SQLiteAnalysisRepository(AnalysisRepository):
             rows = connection.execute(statement, parameters).fetchall()
         return [self._row_to_job(row) for row in rows]
 
-    def count_jobs(self) -> int:
+    def count_jobs(self, *, dataset_id: str = "") -> int:
+        where_clause, parameters = self._job_filter_query(dataset_id=dataset_id)
         with self._connect() as connection:
-            row = connection.execute("SELECT COUNT(*) FROM analysis_jobs").fetchone()
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM analysis_jobs{where_clause}",
+                parameters,
+            ).fetchone()
         return int(row[0]) if row is not None else 0
 
     def get_job(self, job_id: str) -> AnalysisJob | None:
@@ -90,10 +100,21 @@ class SQLiteAnalysisRepository(AnalysisRepository):
         return job
 
     def list_outputs(self, job_id: str) -> list[AnalysisOutput]:
+        return self.list_outputs_for_jobs([job_id])
+
+    def list_outputs_for_jobs(self, job_ids: list[str]) -> list[AnalysisOutput]:
+        normalized_job_ids = list(dict.fromkeys(job_id.strip() for job_id in job_ids if job_id.strip()))
+        if not normalized_job_ids:
+            return []
+        placeholders = ", ".join("?" for _ in normalized_job_ids)
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM analysis_outputs WHERE analysis_job_id = ? ORDER BY updated_at DESC",
-                (job_id,),
+                (
+                    "SELECT * FROM analysis_outputs "
+                    f"WHERE analysis_job_id IN ({placeholders}) "
+                    "ORDER BY updated_at DESC"
+                ),
+                normalized_job_ids,
             ).fetchall()
         return [self._row_to_output(row) for row in rows]
 
@@ -221,6 +242,12 @@ class SQLiteAnalysisRepository(AnalysisRepository):
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+    def _job_filter_query(self, *, dataset_id: str) -> tuple[str, list[Any]]:
+        normalized_dataset_id = dataset_id.strip()
+        if not normalized_dataset_id:
+            return "", []
+        return " WHERE dataset_id = ?", [normalized_dataset_id]
 
     def _parse_datetime(self, value: str) -> datetime:
         return datetime.fromisoformat(value)

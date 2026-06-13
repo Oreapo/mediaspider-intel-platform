@@ -6,7 +6,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...domain.models.notification import NotificationDelivery, NotificationRule
+from ...domain.models.notification import (
+    NotificationChannel,
+    NotificationDelivery,
+    NotificationDeliveryStatus,
+    NotificationRule,
+)
 from ...domain.repositories.notification_repository import NotificationRepository
 
 
@@ -89,10 +94,75 @@ class SQLiteNotificationRepository(NotificationRepository):
             connection.commit()
             return cursor.rowcount > 0
 
-    def list_deliveries(self) -> list[NotificationDelivery]:
+    def list_deliveries(
+        self,
+        *,
+        rule_id: str | None = None,
+        status: NotificationDeliveryStatus | None = None,
+        channel: NotificationChannel | None = None,
+        target_type: str = "",
+        target_id: str = "",
+        is_read: bool | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[NotificationDelivery]:
+        where_clause, parameters = self._delivery_filter_query(
+            rule_id=rule_id,
+            status=status,
+            channel=channel,
+            target_type=target_type,
+            target_id=target_id,
+            is_read=is_read,
+            query=query,
+        )
+        statement = f"SELECT * FROM notification_deliveries{where_clause} ORDER BY created_at DESC"
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM notification_deliveries ORDER BY created_at DESC").fetchall()
+            rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_delivery(row) for row in rows]
+
+    def count_deliveries(
+        self,
+        *,
+        rule_id: str | None = None,
+        status: NotificationDeliveryStatus | None = None,
+        channel: NotificationChannel | None = None,
+        target_type: str = "",
+        target_id: str = "",
+        is_read: bool | None = None,
+        query: str = "",
+    ) -> int:
+        where_clause, parameters = self._delivery_filter_query(
+            rule_id=rule_id,
+            status=status,
+            channel=channel,
+            target_type=target_type,
+            target_id=target_id,
+            is_read=is_read,
+            query=query,
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM notification_deliveries{where_clause}",
+                tuple(parameters),
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def get_delivery(self, delivery_id: str) -> NotificationDelivery | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM notification_deliveries WHERE id = ?",
+                (delivery_id,),
+            ).fetchone()
+        return self._row_to_delivery(row) if row is not None else None
 
     def save_delivery(self, delivery: NotificationDelivery) -> NotificationDelivery:
         payload = delivery.model_dump(mode="json")
@@ -192,6 +262,8 @@ class SQLiteNotificationRepository(NotificationRepository):
             connection.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_rule ON notification_deliveries (rule_id)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_target ON notification_deliveries (target_type, target_id)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_status ON notification_deliveries (status)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel ON notification_deliveries (channel)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_created_at ON notification_deliveries (created_at DESC)")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -241,6 +313,65 @@ class SQLiteNotificationRepository(NotificationRepository):
         rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
         if column not in {row["name"] for row in rows}:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _delivery_filter_query(
+        self,
+        *,
+        rule_id: str | None,
+        status: NotificationDeliveryStatus | None,
+        channel: NotificationChannel | None,
+        target_type: str,
+        target_id: str,
+        is_read: bool | None,
+        query: str,
+    ) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if rule_id:
+            clauses.append("rule_id = ?")
+            parameters.append(rule_id)
+        if status:
+            clauses.append("status = ?")
+            parameters.append(status.value)
+        if channel:
+            clauses.append("channel = ?")
+            parameters.append(channel.value)
+        normalized_target_type = target_type.strip().lower()
+        if normalized_target_type:
+            clauses.append("lower(target_type) = ?")
+            parameters.append(normalized_target_type)
+        normalized_target_id = target_id.strip()
+        if normalized_target_id:
+            clauses.append("target_id = ?")
+            parameters.append(normalized_target_id)
+        if is_read is not None:
+            read_expression = (
+                "coalesce(CAST(json_extract(payload_json, '$._inbox.read_at') AS TEXT), '') "
+                "NOT IN ('', '0', 'false')"
+            )
+            clauses.append(read_expression if is_read else f"NOT ({read_expression})")
+        needle = query.strip().lower()
+        if needle:
+            search_columns = (
+                "id",
+                "rule_id",
+                "target_type",
+                "target_id",
+                "channel",
+                "status",
+                "error_message",
+                "payload_json",
+            )
+            query_clauses = [
+                f"lower(coalesce({column}, '')) LIKE ? ESCAPE '\\'" for column in search_columns
+            ]
+            clauses.append(f"({' OR '.join(query_clauses)})")
+            parameters.extend([self._like_value(needle)] * len(query_clauses))
+        return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), parameters
+
+    def _like_value(self, value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
 
     def _dump_json(self, value: object) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)

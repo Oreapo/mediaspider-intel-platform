@@ -365,6 +365,10 @@ function schedulerResultCount(item: { results?: Array<Record<string, unknown>> }
   return Array.isArray(item.results) ? item.results.length : 0
 }
 
+function schedulerTriggerLabel(triggerType?: string) {
+  return triggerType === 'manual' ? t('tasks.schedulerManual') : t('tasks.schedulerBackground')
+}
+
 function labelValue(value: string) {
   const key = `enum.${value}`
   const translated = t(key)
@@ -498,6 +502,30 @@ onMounted(loadSchedulerStatus)
           <strong>{{ schedulerStatus.is_running ? t('tasks.schedulerRunning') : t('tasks.schedulerStopped') }}</strong>
         </article>
         <article class="scheduler-card">
+          <span>{{ t('tasks.scanActivity') }}</span>
+          <strong>{{ schedulerStatus.is_executing ? t('tasks.schedulerExecuting') : t('tasks.schedulerIdle') }}</strong>
+        </article>
+        <article class="scheduler-card">
+          <span>{{ t('tasks.queuedRuns') }}</span>
+          <strong>{{ schedulerStatus.queued_runs }}</strong>
+        </article>
+        <article class="scheduler-card">
+          <span>{{ t('tasks.taskRunCapacity') }}</span>
+          <strong>{{ schedulerStatus.active_task_runs }} / {{ schedulerStatus.max_concurrent_task_runs }}</strong>
+        </article>
+        <article class="scheduler-card">
+          <span>{{ t('tasks.taskRunQueue') }}</span>
+          <strong>{{ schedulerStatus.queued_task_runs }}</strong>
+        </article>
+        <article class="scheduler-card">
+          <span>{{ t('tasks.taskQueueTimeout') }}</span>
+          <strong>{{ schedulerStatus.task_queue_timeout_seconds }}s</strong>
+        </article>
+        <article class="scheduler-card">
+          <span>{{ t('tasks.recoveredRuns') }}</span>
+          <strong>{{ schedulerStatus.recovered_task_runs }}</strong>
+        </article>
+        <article class="scheduler-card">
           <span>{{ t('tasks.scanInterval') }}</span>
           <strong>{{ schedulerStatus.interval_seconds }}s</strong>
         </article>
@@ -513,10 +541,16 @@ onMounted(loadSchedulerStatus)
       <div v-if="latestSchedulerHistory.length" class="scheduler-history">
         <article v-for="item in latestSchedulerHistory" :key="`${item.ran_at}-${item.status}`" class="scheduler-history-item">
           <div>
-            <strong>{{ item.status }}</strong>
+            <strong>{{ labelValue(item.status) }}</strong>
             <span>{{ item.ran_at }}</span>
           </div>
-          <span>{{ t('tasks.resultCount', { count: schedulerResultCount(item) }) }}</span>
+          <span>
+            {{ schedulerTriggerLabel(item.trigger_type) }}
+            ·
+            {{ item.execute_crawler ? t('tasks.schedulerRealRun') : t('tasks.schedulerDryRun') }}
+            ·
+            {{ t('tasks.resultCount', { count: schedulerResultCount(item) }) }}
+          </span>
           <code v-if="item.error">{{ item.error }}</code>
         </article>
       </div>

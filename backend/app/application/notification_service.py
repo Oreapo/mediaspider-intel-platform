@@ -84,32 +84,21 @@ class NotificationService:
         limit: int | None = None,
         offset: int = 0,
     ) -> dict[str, Any]:
-        deliveries = [
-            delivery
-            for delivery in self.search_deliveries(
-                status=NotificationDeliveryStatus.SENT,
-                channel=NotificationChannel.INTERNAL_INBOX,
-                query=query,
-            )
-            if not unread_only or not self._is_delivery_read(delivery)
-        ]
-        total = len(deliveries)
-        unread_count = sum(
-            1
-            for delivery in self.search_deliveries(
-                status=NotificationDeliveryStatus.SENT,
-                channel=NotificationChannel.INTERNAL_INBOX,
-            )
-            if not self._is_delivery_read(delivery)
-        )
-        if offset:
-            deliveries = deliveries[offset:]
-        if limit is not None:
-            deliveries = deliveries[:limit]
+        filters = {
+            "status": NotificationDeliveryStatus.SENT,
+            "channel": NotificationChannel.INTERNAL_INBOX,
+            "query": query,
+            "is_read": False if unread_only else None,
+        }
+        deliveries = self.repository.list_deliveries(**filters, limit=limit, offset=offset)
         return {
             "items": [self._inbox_item(delivery) for delivery in deliveries],
-            "total": total,
-            "unread_count": unread_count,
+            "total": self.repository.count_deliveries(**filters),
+            "unread_count": self.repository.count_deliveries(
+                status=NotificationDeliveryStatus.SENT,
+                channel=NotificationChannel.INTERNAL_INBOX,
+                is_read=False,
+            ),
         }
 
     def update_inbox_item(self, delivery_id: str, read: bool = True) -> dict[str, Any]:
@@ -127,9 +116,10 @@ class NotificationService:
 
     def mark_all_inbox_read(self) -> dict[str, Any]:
         count = 0
-        for delivery in self.repository.list_deliveries():
-            if delivery.channel != NotificationChannel.INTERNAL_INBOX or self._is_delivery_read(delivery):
-                continue
+        for delivery in self.repository.list_deliveries(
+            channel=NotificationChannel.INTERNAL_INBOX,
+            is_read=False,
+        ):
             self.update_inbox_item(delivery.id, read=True)
             count += 1
         return {"updated_count": count}
@@ -206,30 +196,17 @@ class NotificationService:
         limit: int | None = None,
         offset: int = 0,
     ) -> tuple[list[NotificationDelivery], int]:
-        deliveries = self.repository.list_deliveries()
-        normalized_query = query.strip().lower()
-        normalized_target_type = target_type.strip().lower()
-
-        filtered: list[NotificationDelivery] = []
-        for delivery in deliveries:
-            if rule_id and delivery.rule_id != rule_id:
-                continue
-            if status and delivery.status != status:
-                continue
-            if channel and delivery.channel != channel:
-                continue
-            if normalized_target_type and delivery.target_type.lower() != normalized_target_type:
-                continue
-            if normalized_query and normalized_query not in self._delivery_search_text(delivery):
-                continue
-            filtered.append(delivery)
-
-        total = len(filtered)
-        if offset:
-            filtered = filtered[offset:]
-        if limit is not None:
-            filtered = filtered[:limit]
-        return filtered, total
+        filters = {
+            "rule_id": rule_id,
+            "status": status,
+            "channel": channel,
+            "target_type": target_type,
+            "query": query,
+        }
+        return (
+            self.repository.list_deliveries(**filters, limit=limit, offset=offset),
+            self.repository.count_deliveries(**filters),
+        )
 
     def run_scheduled_digests(self, now: datetime | None = None) -> dict[str, Any]:
         current = now or datetime.utcnow()
@@ -369,11 +346,12 @@ class NotificationService:
         if rule.cooldown_minutes <= 0:
             return False
         cutoff = datetime.utcnow() - timedelta(minutes=rule.cooldown_minutes)
-        for delivery in self.repository.list_deliveries():
-            if delivery.rule_id != rule.id or delivery.target_type != target_type or delivery.target_id != target_id:
-                continue
-            if delivery.status != NotificationDeliveryStatus.SENT:
-                continue
+        for delivery in self.repository.list_deliveries(
+            rule_id=rule.id,
+            status=NotificationDeliveryStatus.SENT,
+            target_type=target_type,
+            target_id=target_id,
+        ):
             if delivery.created_at >= cutoff:
                 return True
         return False
@@ -458,10 +436,7 @@ class NotificationService:
         return self.repository.save_delivery(delivery)
 
     def _get_delivery(self, delivery_id: str) -> NotificationDelivery | None:
-        for delivery in self.repository.list_deliveries():
-            if delivery.id == delivery_id:
-                return delivery
-        return None
+        return self.repository.get_delivery(delivery_id)
 
     def _is_delivery_read(self, delivery: NotificationDelivery) -> bool:
         inbox = delivery.payload_json.get("_inbox")

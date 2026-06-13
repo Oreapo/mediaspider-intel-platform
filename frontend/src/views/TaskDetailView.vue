@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listDatasets, previewDataset } from '../api/datasets'
-import { disableTask, enableTask, getCrawlerDiagnostics, getTask, listTaskRuns, startTaskRun } from '../api/tasks'
+import { cancelTaskRun, disableTask, enableTask, getCrawlerDiagnostics, getTask, listTaskRunsPage, startTaskRun } from '../api/tasks'
 import AppAlert from '../components/ui/AppAlert.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
+import PaginationBar from '../components/ui/PaginationBar.vue'
 import PermissionGate from '../components/ui/PermissionGate.vue'
 import RetryState from '../components/ui/RetryState.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useI18n } from '../composables/useI18n'
+import { requestConfirm } from '../lib/confirm'
+import { lastPageOffset } from '../lib/pagination'
 import type { CollectionTask, CrawlerDiagnostics, Dataset, DatasetPreview, TaskRun } from '../types'
 
 const route = useRoute()
@@ -20,19 +23,28 @@ const taskId = computed(() => String(route.params.taskId || ''))
 
 const task = ref<CollectionTask | null>(null)
 const runs = ref<TaskRun[]>([])
+const runTotal = ref(0)
+const runStatusCounts = ref({ succeeded: 0, failed: 0 })
+const runLimit = 10
+const runOffset = ref(0)
 const datasets = ref<Dataset[]>([])
 const diagnostics = ref<CrawlerDiagnostics | null>(null)
 const selectedDatasetPreview = ref<DatasetPreview | null>(null)
 const selectedDatasetId = ref('')
 const isLoading = ref(false)
+const runsLoading = ref(false)
 const busy = ref(false)
+const cancellingRunIds = ref<string[]>([])
 const message = ref('')
 const error = ref('')
+let detailRequestId = 0
+let runsRequestId = 0
+let previewRequestId = 0
 
 const summaryCards = computed(() => [
-  { label: t('taskDetail.runCount'), value: runs.value.length },
-  { label: t('taskDetail.succeededRuns'), value: runs.value.filter((run) => run.status === 'succeeded').length },
-  { label: t('taskDetail.failedRuns'), value: runs.value.filter((run) => run.status === 'failed').length },
+  { label: t('taskDetail.runCount'), value: runTotal.value },
+  { label: t('taskDetail.succeededRuns'), value: runStatusCounts.value.succeeded },
+  { label: t('taskDetail.failedRuns'), value: runStatusCounts.value.failed },
   { label: t('taskDetail.linkedDatasets'), value: datasets.value.length },
 ])
 
@@ -41,22 +53,63 @@ const payloadJson = computed(() => JSON.stringify(task.value?.task_payload_json 
 const analysisJson = computed(() => JSON.stringify(task.value?.analysis_profile_json || {}, null, 2))
 
 async function loadDetail() {
-  if (!taskId.value) return
+  const requestedTaskId = taskId.value
+  if (!requestedTaskId) return
+  const requestId = ++detailRequestId
+  const runRequestId = ++runsRequestId
   isLoading.value = true
   error.value = ''
   try {
-    const [taskItem, runItems, datasetItems] = await Promise.all([
-      getTask(taskId.value),
-      listTaskRuns(taskId.value),
-      listDatasets({ q: taskId.value, limit: 100 }),
+    const [taskItem, runPage, datasetItems] = await Promise.all([
+      getTask(requestedTaskId),
+      listTaskRunsPage(requestedTaskId, runLimit, runOffset.value),
+      listDatasets({ source_task_id: requestedTaskId }),
     ])
+    if (requestId !== detailRequestId || requestedTaskId !== taskId.value) return
     task.value = taskItem
-    runs.value = runItems
-    datasets.value = datasetItems.filter((item) => item.source_task_id === taskId.value)
+    datasets.value = datasetItems
+    if (runRequestId === runsRequestId) {
+      runs.value = runPage.runs
+      runTotal.value = runPage.total
+      runStatusCounts.value = runPage.status_counts
+      const normalizedOffset = lastPageOffset(runTotal.value, runLimit)
+      if (runOffset.value > normalizedOffset) {
+        runOffset.value = normalizedOffset
+        if (runTotal.value > 0) await loadRuns()
+      }
+    }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    if (requestId === detailRequestId && requestedTaskId === taskId.value) {
+      error.value = err instanceof Error ? err.message : String(err)
+    }
   } finally {
-    isLoading.value = false
+    if (requestId === detailRequestId) {
+      isLoading.value = false
+    }
+  }
+}
+
+async function loadRuns(offset = runOffset.value) {
+  const requestedTaskId = taskId.value
+  if (!requestedTaskId) return
+  const requestId = ++runsRequestId
+  runsLoading.value = true
+  error.value = ''
+  try {
+    const runPage = await listTaskRunsPage(requestedTaskId, runLimit, offset)
+    if (requestId !== runsRequestId || requestedTaskId !== taskId.value) return
+    runs.value = runPage.runs
+    runTotal.value = runPage.total
+    runStatusCounts.value = runPage.status_counts
+    runOffset.value = offset
+  } catch (err) {
+    if (requestId === runsRequestId && requestedTaskId === taskId.value) {
+      error.value = err instanceof Error ? err.message : String(err)
+    }
+  } finally {
+    if (requestId === runsRequestId) {
+      runsLoading.value = false
+    }
   }
 }
 
@@ -71,6 +124,7 @@ async function runNow() {
       run.status === 'succeeded'
         ? t('tasks.runCompleted')
         : t('tasks.runStatus', { status: labelValue(run.status) })
+    runOffset.value = 0
     await loadDetail()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -94,6 +148,30 @@ async function toggleStatus(nextStatus: 'enabled' | 'disabled') {
   }
 }
 
+async function cancelRun(run: TaskRun) {
+  if (!task.value || run.status !== 'pending') return
+  const confirmed = await requestConfirm({
+    title: t('taskDetail.cancelRunTitle'),
+    message: t('taskDetail.cancelRunMessage'),
+    confirmLabel: t('taskDetail.cancelRunConfirm'),
+    tone: 'warning',
+  })
+  if (!confirmed) return
+
+  cancellingRunIds.value = [...cancellingRunIds.value, run.id]
+  message.value = ''
+  error.value = ''
+  try {
+    await cancelTaskRun(task.value.id, run.id)
+    message.value = t('taskDetail.runCancelled')
+    await loadRuns()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    cancellingRunIds.value = cancellingRunIds.value.filter((id) => id !== run.id)
+  }
+}
+
 async function diagnose() {
   if (!task.value) return
   busy.value = true
@@ -110,13 +188,20 @@ async function diagnose() {
 }
 
 async function openDataset(datasetId: string) {
+  const requestId = ++previewRequestId
+  const requestedTaskId = taskId.value
   selectedDatasetId.value = datasetId
   selectedDatasetPreview.value = null
   error.value = ''
   try {
-    selectedDatasetPreview.value = await previewDataset(datasetId, 20)
+    const datasetPreview = await previewDataset(datasetId, 20)
+    if (requestId === previewRequestId && requestedTaskId === taskId.value) {
+      selectedDatasetPreview.value = datasetPreview
+    }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    if (requestId === previewRequestId && requestedTaskId === taskId.value) {
+      error.value = err instanceof Error ? err.message : String(err)
+    }
   }
 }
 
@@ -133,7 +218,25 @@ function labelValue(value: string) {
   return translated === key ? value : translated
 }
 
-onMounted(loadDetail)
+watch(
+  taskId,
+  () => {
+    runsRequestId += 1
+    previewRequestId += 1
+    task.value = null
+    runs.value = []
+    runTotal.value = 0
+    runStatusCounts.value = { succeeded: 0, failed: 0 }
+    runOffset.value = 0
+    datasets.value = []
+    diagnostics.value = null
+    selectedDatasetPreview.value = null
+    selectedDatasetId.value = ''
+    message.value = ''
+    void loadDetail()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -226,7 +329,19 @@ onMounted(loadDetail)
                   <strong>{{ run.id }}</strong>
                   <p>{{ run.trigger_type }} · {{ run.started_at || '-' }}</p>
                 </div>
-                <StatusBadge :label="labelValue(run.status)" :tone="statusTone(run.status)" />
+                <div class="run-actions">
+                  <StatusBadge :label="labelValue(run.status)" :tone="statusTone(run.status)" />
+                  <PermissionGate v-if="run.status === 'pending'" area="operations" compact>
+                    <button
+                      class="secondary-button"
+                      :disabled="cancellingRunIds.includes(run.id)"
+                      type="button"
+                      @click="cancelRun(run)"
+                    >
+                      {{ cancellingRunIds.includes(run.id) ? t('taskDetail.cancellingRun') : t('taskDetail.cancelRun') }}
+                    </button>
+                  </PermissionGate>
+                </div>
               </div>
               <div class="item-meta">
                 <span>{{ t('taskDetail.finishedAt') }}: {{ run.finished_at || '-' }}</span>
@@ -236,6 +351,13 @@ onMounted(loadDetail)
             </article>
             <EmptyState v-if="!runs.length" :title="t('taskDetail.noRunsTitle')" :description="t('taskDetail.noRunsDescription')" />
           </div>
+          <PaginationBar
+            :total="runTotal"
+            :limit="runLimit"
+            :offset="runOffset"
+            :loading="isLoading || runsLoading"
+            @change="loadRuns"
+          />
         </BaseSection>
 
         <BaseSection :title="t('taskDetail.linkedDatasets')" :description="t('taskDetail.linkedDatasetsDescription')">
@@ -310,7 +432,8 @@ onMounted(loadDetail)
 }
 
 .hero-actions,
-.diagnostics-head {
+.diagnostics-head,
+.run-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;

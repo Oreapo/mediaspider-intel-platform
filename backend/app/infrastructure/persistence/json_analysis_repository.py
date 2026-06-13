@@ -12,16 +12,22 @@ class JsonAnalysisRepository(AnalysisRepository):
         self.jobs_file = jobs_file
         self.outputs_file = outputs_file
 
-    def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[AnalysisJob]:
-        jobs = sorted(self._load_jobs(), key=lambda job: job.updated_at, reverse=True)
+    def list_jobs(
+        self,
+        *,
+        dataset_id: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[AnalysisJob]:
+        jobs = self._filtered_jobs(dataset_id=dataset_id)
         if offset > 0:
             jobs = jobs[offset:]
         if limit is not None:
             jobs = jobs[:limit]
         return jobs
 
-    def count_jobs(self) -> int:
-        return len(self._load_jobs())
+    def count_jobs(self, *, dataset_id: str = "") -> int:
+        return len(self._filtered_jobs(dataset_id=dataset_id))
 
     def get_job(self, job_id: str) -> AnalysisJob | None:
         for job in self._load_jobs():
@@ -43,7 +49,21 @@ class JsonAnalysisRepository(AnalysisRepository):
         return job
 
     def list_outputs(self, job_id: str) -> list[AnalysisOutput]:
-        return [output for output in self._load_outputs() if output.analysis_job_id == job_id]
+        return self.list_outputs_for_jobs([job_id])
+
+    def list_outputs_for_jobs(self, job_ids: list[str]) -> list[AnalysisOutput]:
+        normalized_job_ids = {job_id.strip() for job_id in job_ids if job_id.strip()}
+        if not normalized_job_ids:
+            return []
+        return sorted(
+            [
+                output
+                for output in self._load_outputs()
+                if output.analysis_job_id in normalized_job_ids
+            ],
+            key=lambda output: output.updated_at,
+            reverse=True,
+        )
 
     def save_output(self, output: AnalysisOutput) -> AnalysisOutput:
         outputs = self._load_outputs()
@@ -71,6 +91,13 @@ class JsonAnalysisRepository(AnalysisRepository):
                 jobs.append(AnalysisJob.model_validate(item))
             except Exception:
                 continue
+        return jobs
+
+    def _filtered_jobs(self, *, dataset_id: str) -> list[AnalysisJob]:
+        jobs = sorted(self._load_jobs(), key=lambda job: job.updated_at, reverse=True)
+        normalized_dataset_id = dataset_id.strip()
+        if normalized_dataset_id:
+            jobs = [job for job in jobs if job.dataset_id == normalized_dataset_id]
         return jobs
 
     def _load_outputs(self) -> list[AnalysisOutput]:

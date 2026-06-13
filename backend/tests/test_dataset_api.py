@@ -119,6 +119,7 @@ def test_dataset_list_supports_filters_search_and_pagination(tmp_path):
                 "dataset_name": "XHS Lead Notes",
                 "dataset_type": "raw",
                 "source_platform": "xhs",
+                "source_task_id": "task_target",
                 "scenario_type": "lead_diversion",
                 "storage_uri": "xhs_leads.jsonl",
                 "tags": ["lead", "spring"],
@@ -127,6 +128,7 @@ def test_dataset_list_supports_filters_search_and_pagination(tmp_path):
                 "dataset_name": "DY Topic Videos",
                 "dataset_type": "analysis_ready",
                 "source_platform": "dy",
+                "source_task_id": "task_other",
                 "scenario_type": "topic_watch",
                 "storage_uri": "dy_topics.jsonl",
                 "tags": ["topic", "video"],
@@ -135,6 +137,7 @@ def test_dataset_list_supports_filters_search_and_pagination(tmp_path):
                 "dataset_name": "Xianyu Product Risk",
                 "dataset_type": "normalized",
                 "source_platform": "xianyu",
+                "source_task_id": "task_target",
                 "scenario_type": "product_risk",
                 "storage_uri": "xianyu_products.jsonl",
                 "tags": ["seller", "price"],
@@ -160,6 +163,14 @@ def test_dataset_list_supports_filters_search_and_pagination(tmp_path):
         assert query_response.status_code == 200
         assert query_response.json()["datasets"][0]["scenario_type"] == "topic_watch"
 
+        task_response = client.get("/api/datasets", params={"source_task_id": "task_target"})
+        assert task_response.status_code == 200
+        assert {item["dataset_name"] for item in task_response.json()["datasets"]} == {
+            "XHS Lead Notes",
+            "Xianyu Product Risk",
+        }
+        assert task_response.json()["total"] == 2
+
         page_response = client.get("/api/datasets", params={"limit": 1, "offset": 1})
         assert page_response.status_code == 200
         assert len(page_response.json()["datasets"]) == 1
@@ -184,6 +195,7 @@ def test_dataset_list_contract_is_preserved_in_sqlite_mode(tmp_path, monkeypatch
                     "dataset_name": f"SQLite Lead Dataset {index}",
                     "dataset_type": "raw",
                     "source_platform": "xhs",
+                    "source_task_id": "task_sqlite",
                     "scenario_type": "lead_diversion",
                     "storage_uri": f"sqlite_lead_{index}.jsonl",
                     "tags": ["lead", f"batch-{index}"],
@@ -195,6 +207,7 @@ def test_dataset_list_contract_is_preserved_in_sqlite_mode(tmp_path, monkeypatch
             "/api/datasets",
             params={
                 "source_platform": "xhs",
+                "source_task_id": "task_sqlite",
                 "tag": "lead",
                 "q": "sqlite_lead",
                 "limit": 1,

@@ -12,11 +12,12 @@ router = APIRouter(prefix="/analysis", tags=["analysis"], dependencies=[Depends(
 
 @router.get("/jobs")
 def list_analysis_jobs(
+    dataset_id: str = "",
     limit: int | None = Query(default=None, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     service: AnalysisService = Depends(get_analysis_service),
 ):
-    jobs, total = service.list_jobs_page(limit=limit, offset=offset)
+    jobs, total = service.list_jobs_page(dataset_id=dataset_id, limit=limit, offset=offset)
     return {"jobs": [job.model_dump(mode="json") for job in jobs], "total": total}
 
 
@@ -30,6 +31,15 @@ def create_analysis_job(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"message": "Analysis job created", "job": job.model_dump(mode="json")}
+
+
+@router.get("/outputs")
+def list_analysis_outputs(
+    job_ids: list[str] = Query(default=[]),
+    service: AnalysisService = Depends(get_analysis_service),
+):
+    outputs = service.get_outputs_for_jobs(job_ids)
+    return {"outputs": [output.model_dump(mode="json") for output in outputs]}
 
 
 @router.get("/jobs/{job_id}")

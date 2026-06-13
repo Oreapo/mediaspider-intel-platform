@@ -24,7 +24,7 @@ import { useDatasets } from '../composables/useDatasets'
 import { useEntities } from '../composables/useEntities'
 import { useI18n } from '../composables/useI18n'
 import { useSignals } from '../composables/useSignals'
-import { getAnalysisOutputs } from '../api/analysis'
+import { getAnalysisOutputsBatch } from '../api/analysis'
 import { downloadEvidencePacket, generateEvidencePacket } from '../api/evidence'
 import { requestConfirm } from '../lib/confirm'
 import { lastPageOffset } from '../lib/pagination'
@@ -45,6 +45,7 @@ const { items: analysisJobItems } = useAnalysisJobs()
 const { t } = useI18n()
 
 const analysisOutputs = ref<AnalysisOutput[]>([])
+let analysisOutputsRequestId = 0
 const selectedDetail = ref<CaseDetail | null>(null)
 const busy = ref(false)
 const downloadingEvidenceId = ref('')
@@ -169,15 +170,17 @@ const linkTargets = computed(() => {
 })
 
 async function loadAnalysisOutputs() {
-  const outputs: AnalysisOutput[] = []
-  for (const job of analysisJobItems.value) {
-    try {
-      outputs.push(...(await getAnalysisOutputs(job.id)))
-    } catch {
-      continue
+  const requestId = ++analysisOutputsRequestId
+  try {
+    const outputs = await getAnalysisOutputsBatch(analysisJobItems.value.map((job) => job.id))
+    if (requestId === analysisOutputsRequestId) {
+      analysisOutputs.value = outputs
+    }
+  } catch {
+    if (requestId === analysisOutputsRequestId) {
+      analysisOutputs.value = []
     }
   }
-  analysisOutputs.value = outputs
 }
 
 function validateCaseForm() {

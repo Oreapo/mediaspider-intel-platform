@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from threading import BoundedSemaphore, RLock
+from time import monotonic
 from typing import Callable, Any
 
 from ..domain.models.platform import PlatformKey
@@ -19,11 +21,31 @@ class CollectionTaskService:
         dataset_service: DatasetService | None = None,
         crawler_runner: CrawlerRunner | None = None,
         auth_profile_resolver: Callable[[str], dict[str, Any]] | None = None,
+        max_concurrent_runs: int = 1,
+        queue_timeout_seconds: float = 300,
+        recover_interrupted_runs: bool = True,
     ):
         self.repository = repository
         self.dataset_service = dataset_service
         self.crawler_runner = crawler_runner
         self.auth_profile_resolver = auth_profile_resolver
+        self.max_concurrent_runs = max(1, max_concurrent_runs)
+        self.queue_timeout_seconds = max(0.01, queue_timeout_seconds)
+        self._run_slots = BoundedSemaphore(self.max_concurrent_runs)
+        self._run_state_lock = RLock()
+        self._active_task_runs = 0
+        self._queued_task_runs = 0
+        self.recovered_task_runs = self.recover_interrupted_runs() if recover_interrupted_runs else 0
+
+    @property
+    def active_task_runs(self) -> int:
+        with self._run_state_lock:
+            return self._active_task_runs
+
+    @property
+    def queued_task_runs(self) -> int:
+        with self._run_state_lock:
+            return self._queued_task_runs
 
     def list_tasks(
         self,
@@ -95,11 +117,88 @@ class CollectionTaskService:
     def delete_task(self, task_id: str) -> bool:
         return self.repository.delete_task(task_id)
 
-    def list_runs(self, task_id: str | None = None) -> list[TaskRun]:
-        return self.repository.list_runs(task_id)
+    def list_runs(
+        self,
+        task_id: str | None = None,
+        *,
+        status: TaskRunStatus | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[TaskRun]:
+        return self.repository.list_runs(task_id, status=status, limit=limit, offset=offset)
+
+    def list_runs_page(
+        self,
+        task_id: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return {
+            "runs": self.repository.list_runs(task_id, limit=limit, offset=offset),
+            "total": self.repository.count_runs(task_id),
+            "status_counts": {
+                "succeeded": self.repository.count_runs(task_id, status=TaskRunStatus.SUCCEEDED),
+                "failed": self.repository.count_runs(task_id, status=TaskRunStatus.FAILED),
+            },
+        }
 
     def get_run(self, run_id: str) -> TaskRun | None:
         return self.repository.get_run(run_id)
+
+    def recover_interrupted_runs(self) -> int:
+        recovered = 0
+        recovered_at = datetime.utcnow()
+        with self._run_state_lock:
+            for run in self.repository.list_runs():
+                if run.status not in {TaskRunStatus.PENDING, TaskRunStatus.RUNNING}:
+                    continue
+                was_pending = run.status == TaskRunStatus.PENDING
+                status = TaskRunStatus.CANCELLED if was_pending else TaskRunStatus.FAILED
+                reason = (
+                    "Queued task run was cancelled during backend restart"
+                    if was_pending
+                    else "Running task was interrupted by backend restart"
+                )
+                recovered_run = run.model_copy(
+                    update={
+                        "status": status,
+                        "finished_at": recovered_at.isoformat(),
+                        "error_message": reason,
+                        "run_result_json": {
+                            **run.run_result_json,
+                            "recovered_after_restart": True,
+                            "previous_status": run.status.value,
+                        },
+                        "updated_at": recovered_at,
+                    }
+                )
+                self.repository.save_run(recovered_run)
+                recovered += 1
+        return recovered
+
+    def cancel_run(self, task_id: str, run_id: str) -> TaskRun:
+        cancelled_at = datetime.utcnow()
+        with self._run_state_lock:
+            run = self.repository.get_run(run_id)
+            if run is None or run.task_id != task_id:
+                raise ValueError("Task run not found")
+            if run.status != TaskRunStatus.PENDING:
+                raise ValueError(f"Only pending task runs can be cancelled; current status is {run.status.value}")
+            cancelled = run.model_copy(
+                update={
+                    "status": TaskRunStatus.CANCELLED,
+                    "finished_at": cancelled_at.isoformat(),
+                    "error_message": "Task run cancelled while waiting in queue",
+                    "run_result_json": {
+                        **run.run_result_json,
+                        "cancelled_at": cancelled_at.isoformat(),
+                        "cancellation_reason": "user_requested",
+                    },
+                    "updated_at": cancelled_at,
+                }
+            )
+            return self.repository.save_run(cancelled)
 
     def set_task_status(self, task_id: str, status: TaskStatus) -> CollectionTask:
         existing = self.repository.get_task(task_id)
@@ -116,34 +215,105 @@ class CollectionTaskService:
         retry_attempt: int = 0,
         max_retries: int = 0,
     ) -> TaskRun:
-        existing = self.repository.get_task(task_id)
-        if existing is None:
-            raise ValueError(f"Task {task_id} not found")
-        if trigger_type != "manual" and existing.status == TaskStatus.DISABLED:
-            raise ValueError(f"Disabled task {task_id} cannot be started by {trigger_type}")
-        if trigger_type != "manual":
+        queued_at = datetime.utcnow()
+        with self._run_state_lock:
+            existing = self.repository.get_task(task_id)
+            if existing is None:
+                raise ValueError(f"Task {task_id} not found")
+            if trigger_type != "manual" and existing.status == TaskStatus.DISABLED:
+                raise ValueError(f"Disabled task {task_id} cannot be started by {trigger_type}")
             active_run = self._active_run(task_id)
             if active_run is not None:
                 raise ValueError(f"Task {task_id} already has active run {active_run.id}")
-        now = datetime.utcnow()
-        updated = existing.model_copy(update={"last_run_at": now.isoformat(), "updated_at": now})
-        self.repository.save_task(updated)
-        task_for_run = self._apply_auth_profile(updated)
-        run = TaskRun(
-            task_id=task_id,
-            status=TaskRunStatus.RUNNING,
-            trigger_type=trigger_type,
-            started_at=now.isoformat(),
-            task_snapshot_json=task_for_run.model_dump(mode="json"),
-            run_result_json={
-                "retry_attempt": retry_attempt,
-                "max_retries": max_retries,
-            },
-        )
-        run = self.repository.save_run(run)
+            task_for_run = self._apply_auth_profile(existing)
+            run = TaskRun(
+                task_id=task_id,
+                status=TaskRunStatus.PENDING if execute_crawler else TaskRunStatus.RUNNING,
+                trigger_type=trigger_type,
+                started_at=None if execute_crawler else queued_at.isoformat(),
+                task_snapshot_json=task_for_run.model_dump(mode="json"),
+                run_result_json={
+                    "retry_attempt": retry_attempt,
+                    "max_retries": max_retries,
+                    "queued_at": queued_at.isoformat(),
+                },
+            )
+            if not execute_crawler:
+                updated = existing.model_copy(
+                    update={"last_run_at": queued_at.isoformat(), "updated_at": queued_at}
+                )
+                self.repository.save_task(updated)
+                task_for_run = self._apply_auth_profile(updated)
+                run = run.model_copy(
+                    update={"task_snapshot_json": task_for_run.model_dump(mode="json")}
+                )
+            run = self.repository.save_run(run)
         if not execute_crawler:
             return run
-        return self._execute_crawler_run(task_for_run, run)
+
+        acquired = self._run_slots.acquire(blocking=False)
+        if not acquired:
+            with self._run_state_lock:
+                self._queued_task_runs += 1
+            try:
+                deadline = monotonic() + self.queue_timeout_seconds
+                while not acquired:
+                    latest_run = self.repository.get_run(run.id)
+                    if latest_run is not None and latest_run.status == TaskRunStatus.CANCELLED:
+                        return latest_run
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        break
+                    acquired = self._run_slots.acquire(timeout=min(0.1, remaining))
+            finally:
+                with self._run_state_lock:
+                    self._queued_task_runs = max(0, self._queued_task_runs - 1)
+            if not acquired:
+                error = f"Task run queue timed out after {self.queue_timeout_seconds:g}s"
+                self._fail_run(run, error)
+                raise ValueError(error)
+
+        started_at = datetime.utcnow()
+        active_registered = False
+        try:
+            with self._run_state_lock:
+                latest_run = self.repository.get_run(run.id)
+                if latest_run is not None and latest_run.status == TaskRunStatus.CANCELLED:
+                    return latest_run
+                self._active_task_runs += 1
+                active_registered = True
+                latest_task = self.repository.get_task(task_id) or existing
+                updated = latest_task.model_copy(
+                    update={"last_run_at": started_at.isoformat(), "updated_at": started_at}
+                )
+                self.repository.save_task(updated)
+                task_for_run = self._apply_auth_profile(updated)
+                queue_wait_seconds = max(0.0, (started_at - queued_at).total_seconds())
+                run = run.model_copy(
+                    update={
+                        "status": TaskRunStatus.RUNNING,
+                        "started_at": started_at.isoformat(),
+                        "task_snapshot_json": task_for_run.model_dump(mode="json"),
+                        "run_result_json": {
+                            **run.run_result_json,
+                            "queue_wait_seconds": round(queue_wait_seconds, 3),
+                            "max_concurrent_runs": self.max_concurrent_runs,
+                        },
+                        "updated_at": started_at,
+                    }
+                )
+                run = self.repository.save_run(run)
+            return self._execute_crawler_run(task_for_run, run)
+        except Exception as exc:
+            latest_run = self.repository.get_run(run.id) or run
+            if latest_run.status in {TaskRunStatus.PENDING, TaskRunStatus.RUNNING}:
+                self._fail_run(latest_run, str(exc))
+            raise
+        finally:
+            if active_registered:
+                with self._run_state_lock:
+                    self._active_task_runs = max(0, self._active_task_runs - 1)
+            self._run_slots.release()
 
     def run_scheduled_tasks(
         self,
@@ -186,6 +356,18 @@ class CollectionTaskService:
                         "status": "skipped",
                         "reason": "retry_exhausted",
                         "retry_attempt": retry_attempt - 1,
+                        "max_retries": max_retries,
+                    }
+                )
+                continue
+            if not execute_crawler:
+                results.append(
+                    {
+                        "task_id": task.id,
+                        "task_name": task.task_name,
+                        "status": "ready",
+                        "reason": "preflight",
+                        "retry_attempt": retry_attempt,
                         "max_retries": max_retries,
                     }
                 )
@@ -282,7 +464,8 @@ class CollectionTaskService:
                     "updated_at": datetime.utcnow(),
                 }
             )
-            return self.repository.save_run(updated)
+            with self._run_state_lock:
+                return self.repository.save_run(updated)
         except Exception as exc:
             return self._fail_run(run, str(exc))
 
@@ -295,7 +478,8 @@ class CollectionTaskService:
                 "updated_at": datetime.utcnow(),
             }
         )
-        return self.repository.save_run(updated)
+        with self._run_state_lock:
+            return self.repository.save_run(updated)
 
     def _dataset_name(self, task: CollectionTask, output_file: Path) -> str:
         return f"{task.task_name} / {self._item_type(output_file)} / {output_file.stem}"

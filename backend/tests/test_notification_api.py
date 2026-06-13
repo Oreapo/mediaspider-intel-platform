@@ -4,6 +4,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -418,7 +419,59 @@ def test_delivery_list_supports_filters_and_pagination(tmp_path):
         set_container(original_container)
 
 
-def test_internal_inbox_supports_read_state(tmp_path):
+def test_delivery_list_contract_is_preserved_in_sqlite_mode(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "storage" / "platform.sqlite3"
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", "sqlite")
+    monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", str(sqlite_path))
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        signal_id = _create_signal(client)
+        rule = client.post(
+            "/api/notifications/rules",
+            json={
+                "rule_name": "SQLite filterable digest",
+                "risk_level_threshold": "medium",
+                "channels": ["internal_inbox", "email"],
+                "cron_expr": "* * * * *",
+                "channel_config_json": {},
+            },
+        ).json()["rule"]
+        run_response = client.post(
+            "/api/notifications/run-scheduled",
+            json={"now": datetime.utcnow().replace(second=0, microsecond=0).isoformat()},
+        )
+        assert run_response.status_code == 200
+
+        response = client.get(
+            "/api/notifications/deliveries",
+            params={
+                "rule_id": rule["id"],
+                "status": "sent",
+                "channel": "internal_inbox",
+                "target_type": "signal",
+                "q": signal_id,
+                "limit": 1,
+                "offset": 0,
+            },
+        )
+
+        assert response.status_code == 200
+        assert set(response.json()) == {"deliveries", "total"}
+        assert len(response.json()["deliveries"]) == 1
+        assert response.json()["deliveries"][0]["target_id"] == signal_id
+        assert response.json()["total"] == 1
+    finally:
+        set_container(original_container)
+
+
+@pytest.mark.parametrize("repository_mode", ["json", "sqlite"])
+def test_internal_inbox_supports_read_state(tmp_path, monkeypatch, repository_mode):
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", repository_mode)
+    if repository_mode == "sqlite":
+        monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", str(tmp_path / "storage" / "platform.sqlite3"))
     test_container = AppContainer(tmp_path)
     original_container = current_container
     set_container(test_container)

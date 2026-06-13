@@ -100,10 +100,19 @@ export interface SchedulerRunHistoryItem {
   status: string
   error?: string
   results: Array<Record<string, unknown>>
+  execute_crawler?: boolean
+  trigger_type?: 'background' | 'manual' | string
 }
 
 export interface SchedulerStatus {
   is_running: boolean
+  is_executing: boolean
+  queued_runs: number
+  active_task_runs: number
+  queued_task_runs: number
+  max_concurrent_task_runs: number
+  task_queue_timeout_seconds: number
+  recovered_task_runs: number
   interval_seconds: number
   execute_crawler: boolean
   run_timeout_seconds: number

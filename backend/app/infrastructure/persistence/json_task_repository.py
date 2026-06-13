@@ -4,7 +4,15 @@ import json
 from pathlib import Path
 
 from ...domain.models.platform import PlatformKey
-from ...domain.models.task import CollectionTask, EntityType, ScenarioType, TaskMode, TaskRun, TaskStatus
+from ...domain.models.task import (
+    CollectionTask,
+    EntityType,
+    ScenarioType,
+    TaskMode,
+    TaskRun,
+    TaskRunStatus,
+    TaskStatus,
+)
 from ...domain.repositories.task_repository import CollectionTaskRepository
 
 
@@ -87,10 +95,40 @@ class JsonCollectionTaskRepository(CollectionTaskRepository):
         self._save_all(filtered)
         return True
 
-    def list_runs(self, task_id: str | None = None) -> list[TaskRun]:
+    def list_runs(
+        self,
+        task_id: str | None = None,
+        *,
+        status: TaskRunStatus | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[TaskRun]:
+        runs = self._filtered_runs(task_id=task_id, status=status)
+        if offset > 0:
+            runs = runs[offset:]
+        if limit is not None:
+            runs = runs[:limit]
+        return runs
+
+    def count_runs(
+        self,
+        task_id: str | None = None,
+        *,
+        status: TaskRunStatus | None = None,
+    ) -> int:
+        return len(self._filtered_runs(task_id=task_id, status=status))
+
+    def _filtered_runs(
+        self,
+        *,
+        task_id: str | None,
+        status: TaskRunStatus | None,
+    ) -> list[TaskRun]:
         runs = self._load_runs()
         if task_id is not None:
             runs = [run for run in runs if run.task_id == task_id]
+        if status is not None:
+            runs = [run for run in runs if run.status == status]
         return sorted(runs, key=lambda run: run.updated_at, reverse=True)
 
     def get_run(self, run_id: str) -> TaskRun | None:

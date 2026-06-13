@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from ...domain.models.platform import PlatformKey
-from ...domain.models.task import CollectionTask, EntityType, ScenarioType, TaskMode, TaskRun, TaskStatus
+from ...domain.models.task import (
+    CollectionTask,
+    EntityType,
+    ScenarioType,
+    TaskMode,
+    TaskRun,
+    TaskRunStatus,
+    TaskStatus,
+)
 from ...domain.repositories.task_repository import CollectionTaskRepository
 
 
@@ -155,16 +163,41 @@ class SQLiteCollectionTaskRepository(CollectionTaskRepository):
             connection.commit()
             return cursor.rowcount > 0
 
-    def list_runs(self, task_id: str | None = None) -> list[TaskRun]:
+    def list_runs(
+        self,
+        task_id: str | None = None,
+        *,
+        status: TaskRunStatus | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[TaskRun]:
+        where_clause, parameters = self._run_filter_query(task_id=task_id, status=status)
+        statement = f"SELECT * FROM task_runs{where_clause} ORDER BY updated_at DESC"
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            if task_id is None:
-                rows = connection.execute("SELECT * FROM task_runs ORDER BY updated_at DESC").fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT * FROM task_runs WHERE task_id = ? ORDER BY updated_at DESC",
-                    (task_id,),
-                ).fetchall()
+            rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_run(row) for row in rows]
+
+    def count_runs(
+        self,
+        task_id: str | None = None,
+        *,
+        status: TaskRunStatus | None = None,
+    ) -> int:
+        where_clause, parameters = self._run_filter_query(task_id=task_id, status=status)
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM task_runs{where_clause}",
+                tuple(parameters),
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     def get_run(self, run_id: str) -> TaskRun | None:
         with self._connect() as connection:
@@ -282,12 +315,31 @@ class SQLiteCollectionTaskRepository(CollectionTaskRepository):
             )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_task_id ON task_runs (task_id)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_status ON task_runs (status)")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_runs_task_updated ON task_runs (task_id, updated_at DESC)"
+            )
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.sqlite_path)
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _run_filter_query(
+        self,
+        *,
+        task_id: str | None,
+        status: TaskRunStatus | None,
+    ) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if task_id is not None:
+            clauses.append("task_id = ?")
+            parameters.append(task_id)
+        if status is not None:
+            clauses.append("status = ?")
+            parameters.append(status.value)
+        return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), parameters
 
     def _row_to_task(self, row: sqlite3.Row) -> CollectionTask:
         return CollectionTask.model_validate(

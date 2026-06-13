@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getAnalysisOutputs, listAnalysisJobs } from '../api/analysis'
+import { getAnalysisOutputsBatch, listAnalysisJobs } from '../api/analysis'
 import { getDataset, previewDataset } from '../api/datasets'
-import { getTask, listTaskRuns } from '../api/tasks'
+import { getTask, getTaskRun } from '../api/tasks'
 import AppAlert from '../components/ui/AppAlert.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -20,12 +20,13 @@ const datasetId = computed(() => String(route.params.datasetId || ''))
 
 const dataset = ref<Dataset | null>(null)
 const sourceTask = ref<CollectionTask | null>(null)
-const sourceRuns = ref<TaskRun[]>([])
+const sourceRun = ref<TaskRun | null>(null)
 const preview = ref<DatasetPreview | null>(null)
 const analysisJobs = ref<AnalysisJob[]>([])
 const analysisOutputs = ref<Record<string, AnalysisOutput[]>>({})
 const isLoading = ref(false)
 const error = ref('')
+let detailRequestId = 0
 
 const summaryCards = computed(() => [
   { label: t('datasetDetail.records'), value: dataset.value?.record_count || 0 },
@@ -35,39 +36,85 @@ const summaryCards = computed(() => [
 ])
 
 async function loadDetail() {
-  if (!datasetId.value) return
+  const requestedDatasetId = datasetId.value
+  if (!requestedDatasetId) return
+  const requestId = ++detailRequestId
   isLoading.value = true
   error.value = ''
+  sourceTask.value = null
+  sourceRun.value = null
+  preview.value = null
+  analysisJobs.value = []
+  analysisOutputs.value = {}
   try {
-    const datasetItem = await getDataset(datasetId.value)
+    const datasetItem = await getDataset(requestedDatasetId)
+    if (requestId !== detailRequestId || requestedDatasetId !== datasetId.value) return
     dataset.value = datasetItem
-    const [previewData, jobs] = await Promise.all([previewDataset(datasetId.value, 50), listAnalysisJobs()])
-    preview.value = previewData
-    analysisJobs.value = jobs.filter((job) => job.dataset_id === datasetId.value)
-    const outputEntries = await Promise.all(
-      analysisJobs.value.map(async (job) => {
-        try {
-          return [job.id, await getAnalysisOutputs(job.id)] as const
-        } catch {
-          return [job.id, []] as const
-        }
-      }),
-    )
-    analysisOutputs.value = Object.fromEntries(outputEntries)
-    if (datasetItem.source_task_id) {
-      sourceTask.value = await getTask(datasetItem.source_task_id)
-      sourceRuns.value = await listTaskRuns(datasetItem.source_task_id)
+    const partialErrors: string[] = []
+    const [previewResult, jobsResult] = await Promise.allSettled([
+      previewDataset(requestedDatasetId, 50),
+      listAnalysisJobs({ dataset_id: requestedDatasetId }),
+    ])
+    if (requestId !== detailRequestId || requestedDatasetId !== datasetId.value) return
+
+    if (previewResult.status === 'fulfilled') {
+      preview.value = previewResult.value
+    } else {
+      partialErrors.push(previewResult.reason instanceof Error ? previewResult.reason.message : String(previewResult.reason))
     }
+    if (jobsResult.status === 'fulfilled') {
+      analysisJobs.value = jobsResult.value
+    } else {
+      partialErrors.push(jobsResult.reason instanceof Error ? jobsResult.reason.message : String(jobsResult.reason))
+    }
+
+    analysisOutputs.value = Object.fromEntries(analysisJobs.value.map((job) => [job.id, []]))
+    if (analysisJobs.value.length) {
+      try {
+        const outputs = await getAnalysisOutputsBatch(analysisJobs.value.map((job) => job.id))
+        if (requestId !== detailRequestId || requestedDatasetId !== datasetId.value) return
+        outputs.forEach((output) => {
+          analysisOutputs.value[output.analysis_job_id]?.push(output)
+        })
+      } catch (err) {
+        partialErrors.push(err instanceof Error ? err.message : String(err))
+      }
+    }
+
+    if (datasetItem.source_task_id) {
+      const [taskResult, runResult] = await Promise.allSettled([
+        getTask(datasetItem.source_task_id),
+        datasetItem.source_run_id
+          ? getTaskRun(datasetItem.source_task_id, datasetItem.source_run_id)
+          : Promise.resolve(null),
+      ])
+      if (requestId !== detailRequestId || requestedDatasetId !== datasetId.value) return
+      if (taskResult.status === 'fulfilled') {
+        sourceTask.value = taskResult.value
+      } else {
+        partialErrors.push(taskResult.reason instanceof Error ? taskResult.reason.message : String(taskResult.reason))
+      }
+      if (runResult.status === 'fulfilled') {
+        sourceRun.value = runResult.value
+      } else {
+        partialErrors.push(runResult.reason instanceof Error ? runResult.reason.message : String(runResult.reason))
+      }
+    }
+    error.value = Array.from(new Set(partialErrors)).join('; ')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    if (requestId === detailRequestId && requestedDatasetId === datasetId.value) {
+      error.value = err instanceof Error ? err.message : String(err)
+    }
   } finally {
-    isLoading.value = false
+    if (requestId === detailRequestId) {
+      isLoading.value = false
+    }
   }
 }
 
 function runStatus(runId: string | null) {
-  if (!runId) return null
-  return sourceRuns.value.find((run) => run.id === runId) || null
+  if (!runId || sourceRun.value?.id !== runId) return null
+  return sourceRun.value
 }
 
 function jobTone(status: string) {
@@ -89,7 +136,19 @@ function scopeLabel(value: string) {
   return translated === key ? value : translated
 }
 
-onMounted(loadDetail)
+watch(
+  datasetId,
+  () => {
+    dataset.value = null
+    sourceTask.value = null
+    sourceRun.value = null
+    preview.value = null
+    analysisJobs.value = []
+    analysisOutputs.value = {}
+    void loadDetail()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

@@ -40,9 +40,13 @@ async function submitLogin() {
   message.value = ''
   if (!validateForm()) return
 
-  await signIn(form.value.username, form.value.password)
-  message.value = t('login.successMessage')
-  await router.replace(redirectTo.value)
+  try {
+    await signIn(form.value.username, form.value.password)
+    message.value = t('login.successMessage')
+    await router.replace(redirectTo.value)
+  } catch {
+    // useAuth exposes the backend error through authError.
+  }
 }
 </script>
 

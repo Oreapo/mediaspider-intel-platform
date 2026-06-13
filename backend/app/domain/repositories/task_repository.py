@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from ..models.platform import PlatformKey
-from ..models.task import CollectionTask, EntityType, ScenarioType, TaskMode, TaskRun, TaskStatus
+from ..models.task import CollectionTask, EntityType, ScenarioType, TaskMode, TaskRun, TaskRunStatus, TaskStatus
 
 
 class CollectionTaskRepository(ABC):
@@ -48,7 +48,23 @@ class CollectionTaskRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_runs(self, task_id: str | None = None) -> list[TaskRun]:
+    def list_runs(
+        self,
+        task_id: str | None = None,
+        *,
+        status: TaskRunStatus | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[TaskRun]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_runs(
+        self,
+        task_id: str | None = None,
+        *,
+        status: TaskRunStatus | None = None,
+    ) -> int:
         raise NotImplementedError
 
     @abstractmethod

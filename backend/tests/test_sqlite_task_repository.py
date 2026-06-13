@@ -80,12 +80,29 @@ def test_sqlite_task_repository_task_crud_and_runs(tmp_path):
         created_at=now + timedelta(minutes=1),
         updated_at=now + timedelta(minutes=1),
     )
+    third_run = TaskRun(
+        id="run_third",
+        task_id="tsk_first",
+        status=TaskRunStatus.FAILED,
+        error_message="retry failed",
+        created_at=now + timedelta(minutes=2),
+        updated_at=now + timedelta(minutes=2),
+    )
     repository.save_run(first_run)
     repository.save_run(second_run)
+    repository.save_run(third_run)
 
     assert repository.get_run("run_first") == first_run
-    assert [item.id for item in repository.list_runs()] == ["run_second", "run_first"]
-    assert [item.id for item in repository.list_runs("tsk_first")] == ["run_first"]
+    assert [item.id for item in repository.list_runs()] == ["run_third", "run_second", "run_first"]
+    assert [item.id for item in repository.list_runs("tsk_first")] == ["run_third", "run_first"]
+    assert [item.id for item in repository.list_runs("tsk_first", limit=1, offset=1)] == ["run_first"]
+    assert [item.id for item in repository.list_runs(status=TaskRunStatus.FAILED)] == [
+        "run_third",
+        "run_second",
+    ]
+    assert repository.count_runs("tsk_first") == 2
+    assert repository.count_runs("tsk_first", status=TaskRunStatus.SUCCEEDED) == 1
+    assert repository.count_runs("tsk_first", status=TaskRunStatus.FAILED) == 1
 
     assert repository.delete_task("tsk_second") is True
     assert repository.delete_task("missing") is False
