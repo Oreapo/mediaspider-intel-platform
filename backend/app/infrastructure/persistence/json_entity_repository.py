@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ...domain.models.entity import EntityRelation, RiskEntity
+from ...domain.models.entity import EntityRelation, RiskEntity, RiskEntityStatus, RiskEntityType
+from ...domain.models.platform import PlatformKey
 from ...domain.repositories.entity_repository import EntityRepository
 
 
@@ -12,8 +13,48 @@ class JsonEntityRepository(EntityRepository):
         self.entities_file = entities_file
         self.relations_file = relations_file
 
-    def list_entities(self) -> list[RiskEntity]:
-        return sorted(self._load_entities(), key=lambda entity: entity.updated_at, reverse=True)
+    def list_entities(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        entity_type: RiskEntityType | None = None,
+        status: RiskEntityStatus | None = None,
+        min_risk_score: float | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[RiskEntity]:
+        entities = self._filtered_entities(
+            platform=platform,
+            entity_type=entity_type,
+            status=status,
+            min_risk_score=min_risk_score,
+            query=query,
+        )
+        if offset > 0:
+            entities = entities[offset:]
+        if limit is not None:
+            entities = entities[:limit]
+        return entities
+
+    def count_entities(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        entity_type: RiskEntityType | None = None,
+        status: RiskEntityStatus | None = None,
+        min_risk_score: float | None = None,
+        query: str = "",
+    ) -> int:
+        return len(
+            self._filtered_entities(
+                platform=platform,
+                entity_type=entity_type,
+                status=status,
+                min_risk_score=min_risk_score,
+                query=query,
+            )
+        )
 
     def get_entity(self, entity_id: str) -> RiskEntity | None:
         for entity in self._load_entities():
@@ -71,6 +112,44 @@ class JsonEntityRepository(EntityRepository):
             return False
         self._save_relations(filtered)
         return True
+
+    def _filtered_entities(
+        self,
+        *,
+        platform: PlatformKey | None,
+        entity_type: RiskEntityType | None,
+        status: RiskEntityStatus | None,
+        min_risk_score: float | None,
+        query: str,
+    ) -> list[RiskEntity]:
+        entities = sorted(self._load_entities(), key=lambda entity: entity.updated_at, reverse=True)
+        if platform:
+            entities = [entity for entity in entities if entity.platform == platform]
+        if entity_type:
+            entities = [entity for entity in entities if entity.entity_type == entity_type]
+        if status:
+            entities = [entity for entity in entities if entity.status == status]
+        if min_risk_score is not None:
+            entities = [entity for entity in entities if entity.risk_score >= min_risk_score]
+        needle = query.strip().lower()
+        if needle:
+            entities = [entity for entity in entities if self._matches_query(entity, needle)]
+        return entities
+
+    def _matches_query(self, entity: RiskEntity, needle: str) -> bool:
+        aliases = entity.profile_json.get("aliases") or []
+        linked_signal_ids = entity.profile_json.get("linked_signal_ids") or []
+        values = [
+            entity.id,
+            entity.entity_type.value,
+            entity.display_name,
+            entity.platform.value,
+            entity.status.value,
+            *aliases,
+            *linked_signal_ids,
+            *entity.source_ref.values(),
+        ]
+        return any(needle in str(value).lower() for value in values if value is not None)
 
     def _load_entities(self) -> list[RiskEntity]:
         if not self.entities_file.exists():

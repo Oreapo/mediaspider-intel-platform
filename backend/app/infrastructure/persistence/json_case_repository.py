@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ...domain.models.case import Case, CaseLink, CaseNote
+from ...domain.models.case import Case, CaseLink, CaseNote, CasePriority, CaseStatus
 from ...domain.repositories.case_repository import CaseRepository
 
 
@@ -13,8 +13,48 @@ class JsonCaseRepository(CaseRepository):
         self.links_file = links_file
         self.notes_file = notes_file
 
-    def list_cases(self) -> list[Case]:
-        return sorted(self._load_cases(), key=lambda case: case.updated_at, reverse=True)
+    def list_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        priority: CasePriority | None = None,
+        case_type: str = "",
+        owner: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Case]:
+        cases = self._filtered_cases(
+            status=status,
+            priority=priority,
+            case_type=case_type,
+            owner=owner,
+            query=query,
+        )
+        if offset > 0:
+            cases = cases[offset:]
+        if limit is not None:
+            cases = cases[:limit]
+        return cases
+
+    def count_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        priority: CasePriority | None = None,
+        case_type: str = "",
+        owner: str = "",
+        query: str = "",
+    ) -> int:
+        return len(
+            self._filtered_cases(
+                status=status,
+                priority=priority,
+                case_type=case_type,
+                owner=owner,
+                query=query,
+            )
+        )
 
     def get_case(self, case_id: str) -> Case | None:
         for case in self._load_cases():
@@ -98,6 +138,42 @@ class JsonCaseRepository(CaseRepository):
             return False
         self._save_notes(filtered)
         return True
+
+    def _filtered_cases(
+        self,
+        *,
+        status: CaseStatus | None,
+        priority: CasePriority | None,
+        case_type: str,
+        owner: str,
+        query: str,
+    ) -> list[Case]:
+        cases = sorted(self._load_cases(), key=lambda case: case.updated_at, reverse=True)
+        if status:
+            cases = [case for case in cases if case.status == status]
+        if priority:
+            cases = [case for case in cases if case.priority == priority]
+        if case_type:
+            cases = [case for case in cases if case.case_type == case_type]
+        owner_needle = owner.strip().lower()
+        if owner_needle:
+            cases = [case for case in cases if owner_needle in case.owner.lower()]
+        query_needle = query.strip().lower()
+        if query_needle:
+            cases = [case for case in cases if self._matches_query(case, query_needle)]
+        return cases
+
+    def _matches_query(self, case: Case, needle: str) -> bool:
+        values = [
+            case.id,
+            case.case_name,
+            case.case_type,
+            case.status.value,
+            case.priority.value,
+            case.summary,
+            case.owner,
+        ]
+        return any(needle in str(value).lower() for value in values)
 
     def _load_cases(self) -> list[Case]:
         return self._load_model_list(self.cases_file, Case)

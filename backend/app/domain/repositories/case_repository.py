@@ -2,12 +2,34 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..models.case import Case, CaseLink, CaseNote
+from ..models.case import Case, CaseLink, CaseNote, CasePriority, CaseStatus
 
 
 class CaseRepository(ABC):
     @abstractmethod
-    def list_cases(self) -> list[Case]:
+    def list_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        priority: CasePriority | None = None,
+        case_type: str = "",
+        owner: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Case]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        priority: CasePriority | None = None,
+        case_type: str = "",
+        owner: str = "",
+        query: str = "",
+    ) -> int:
         raise NotImplementedError
 
     @abstractmethod

@@ -198,6 +198,51 @@ def test_entity_list_supports_filters_search_and_pagination(tmp_path):
         set_container(original_container)
 
 
+def test_entity_list_contract_is_preserved_in_sqlite_mode(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "storage" / "platform.sqlite3"
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", "sqlite")
+    monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", str(sqlite_path))
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        for index in range(3):
+            response = client.post(
+                "/api/entities",
+                json={
+                    "entity_type": "account",
+                    "display_name": f"SQLite risk account {index}",
+                    "platform": "xhs",
+                    "risk_score": 85 + index,
+                    "status": "active",
+                    "source_ref": {"source_entity_id": f"sqlite_source_{index}"},
+                    "profile_json": {"aliases": [f"sqlite_alias_{index}"]},
+                },
+            )
+            assert response.status_code == 200
+
+        response = client.get(
+            "/api/entities",
+            params={
+                "platform": "xhs",
+                "entity_type": "account",
+                "status": "active",
+                "min_risk_score": 80,
+                "q": "sqlite_alias",
+                "limit": 1,
+                "offset": 1,
+            },
+        )
+
+        assert response.status_code == 200
+        assert set(response.json()) == {"entities", "total"}
+        assert len(response.json()["entities"]) == 1
+        assert response.json()["total"] == 3
+    finally:
+        set_container(original_container)
+
+
 def test_relation_duplicate_is_merged_with_evidence(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container

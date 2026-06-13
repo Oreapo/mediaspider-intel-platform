@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...domain.models.entity import EntityRelation, RiskEntity
+from ...domain.models.entity import EntityRelation, RiskEntity, RiskEntityStatus, RiskEntityType
+from ...domain.models.platform import PlatformKey
 from ...domain.repositories.entity_repository import EntityRepository
 
 
@@ -16,10 +17,59 @@ class SQLiteEntityRepository(EntityRepository):
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def list_entities(self) -> list[RiskEntity]:
+    def list_entities(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        entity_type: RiskEntityType | None = None,
+        status: RiskEntityStatus | None = None,
+        min_risk_score: float | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[RiskEntity]:
+        where_clause, parameters = self._entity_filter_query(
+            platform=platform,
+            entity_type=entity_type,
+            status=status,
+            min_risk_score=min_risk_score,
+            query=query,
+        )
+        statement = f"SELECT * FROM risk_entities{where_clause} ORDER BY updated_at DESC"
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM risk_entities ORDER BY updated_at DESC").fetchall()
+            rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_entity(row) for row in rows]
+
+    def count_entities(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        entity_type: RiskEntityType | None = None,
+        status: RiskEntityStatus | None = None,
+        min_risk_score: float | None = None,
+        query: str = "",
+    ) -> int:
+        where_clause, parameters = self._entity_filter_query(
+            platform=platform,
+            entity_type=entity_type,
+            status=status,
+            min_risk_score=min_risk_score,
+            query=query,
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM risk_entities{where_clause}",
+                tuple(parameters),
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     def get_entity(self, entity_id: str) -> RiskEntity | None:
         with self._connect() as connection:
@@ -153,6 +203,8 @@ class SQLiteEntityRepository(EntityRepository):
             connection.execute("CREATE INDEX IF NOT EXISTS idx_entities_type ON risk_entities (entity_type)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_entities_platform ON risk_entities (platform)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_entities_status ON risk_entities (status)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_entities_risk_score ON risk_entities (risk_score)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_entities_updated_at ON risk_entities (updated_at DESC)")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS entity_relations (
@@ -206,6 +258,55 @@ class SQLiteEntityRepository(EntityRepository):
                 "updated_at": self._parse_datetime(row["updated_at"]),
             }
         )
+
+    def _entity_filter_query(
+        self,
+        *,
+        platform: PlatformKey | None,
+        entity_type: RiskEntityType | None,
+        status: RiskEntityStatus | None,
+        min_risk_score: float | None,
+        query: str,
+    ) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        enum_filters = (
+            ("platform", platform),
+            ("entity_type", entity_type),
+            ("status", status),
+        )
+        for column, value in enum_filters:
+            if value:
+                clauses.append(f"{column} = ?")
+                parameters.append(value.value)
+        if min_risk_score is not None:
+            clauses.append("risk_score >= ?")
+            parameters.append(min_risk_score)
+        needle = query.strip().lower()
+        if needle:
+            scalar_values = ("id", "entity_type", "display_name", "platform", "status")
+            query_clauses = [
+                *(f"lower(coalesce({value}, '')) LIKE ? ESCAPE '\\'" for value in scalar_values),
+                (
+                    "EXISTS (SELECT 1 FROM json_each(risk_entities.profile_json, '$.aliases') "
+                    "WHERE lower(CAST(value AS TEXT)) LIKE ? ESCAPE '\\')"
+                ),
+                (
+                    "EXISTS (SELECT 1 FROM json_each(risk_entities.profile_json, '$.linked_signal_ids') "
+                    "WHERE lower(CAST(value AS TEXT)) LIKE ? ESCAPE '\\')"
+                ),
+                (
+                    "EXISTS (SELECT 1 FROM json_each(risk_entities.source_ref) "
+                    "WHERE lower(CAST(value AS TEXT)) LIKE ? ESCAPE '\\')"
+                ),
+            ]
+            clauses.append(f"({' OR '.join(query_clauses)})")
+            parameters.extend([self._like_value(needle)] * len(query_clauses))
+        return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), parameters
+
+    def _like_value(self, value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
 
     def _dump_json(self, value: object) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)

@@ -99,3 +99,49 @@ def test_app_container_can_switch_entity_repository_to_sqlite(tmp_path, monkeypa
 
     assert sqlite_path.exists()
     assert container.entity_service.get_entity(entity.id).display_name == "abc12345"
+
+
+def test_sqlite_entity_repository_filters_counts_and_paginates(tmp_path):
+    repository = SQLiteEntityRepository(tmp_path / "storage.sqlite3")
+    now = datetime.utcnow()
+    entities = [
+        _entity("ent_account", now).model_copy(
+            update={
+                "entity_type": RiskEntityType.ACCOUNT,
+                "display_name": "risk_account 100%",
+                "source_ref": {"source_entity_id": "account_001"},
+                "risk_score": 72,
+                "profile_json": {"aliases": ["risk_account", "ra001"], "linked_signal_ids": ["sig_account"]},
+            }
+        ),
+        _entity("ent_contact", now + timedelta(minutes=1)).model_copy(
+            update={
+                "display_name": "abc12345",
+                "source_ref": {"contact_point": "abc12345"},
+                "risk_score": 88,
+                "profile_json": {"aliases": ["abc12345"], "linked_signal_ids": ["sig_contact"]},
+            }
+        ),
+        _entity("ent_seller", now + timedelta(minutes=2)).model_copy(
+            update={
+                "entity_type": RiskEntityType.SELLER,
+                "display_name": "seller_1",
+                "platform": PlatformKey.XIANYU,
+                "source_ref": {"seller_id": "seller_1"},
+                "risk_score": 45,
+                "status": RiskEntityStatus.DISMISSED,
+                "profile_json": {"aliases": ["seller_1"]},
+            }
+        ),
+    ]
+    for entity in entities:
+        repository.save_entity(entity)
+
+    assert [item.id for item in repository.list_entities(platform=PlatformKey.XIANYU)] == ["ent_seller"]
+    assert [item.id for item in repository.list_entities(status=RiskEntityStatus.DISMISSED)] == ["ent_seller"]
+    assert [item.id for item in repository.list_entities(query="ra001")] == ["ent_account"]
+    assert [item.id for item in repository.list_entities(query="sig_contact")] == ["ent_contact"]
+    assert [item.id for item in repository.list_entities(query="100%")] == ["ent_account"]
+    assert repository.count_entities(min_risk_score=80) == 1
+    assert [item.id for item in repository.list_entities(limit=1, offset=1)] == ["ent_contact"]
+    assert repository.count_entities() == 3

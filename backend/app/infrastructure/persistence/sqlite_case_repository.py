@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...domain.models.case import Case, CaseLink, CaseNote
+from ...domain.models.case import Case, CaseLink, CaseNote, CasePriority, CaseStatus
 from ...domain.repositories.case_repository import CaseRepository
 
 
@@ -16,10 +16,59 @@ class SQLiteCaseRepository(CaseRepository):
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def list_cases(self) -> list[Case]:
+    def list_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        priority: CasePriority | None = None,
+        case_type: str = "",
+        owner: str = "",
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Case]:
+        where_clause, parameters = self._case_filter_query(
+            status=status,
+            priority=priority,
+            case_type=case_type,
+            owner=owner,
+            query=query,
+        )
+        statement = f"SELECT * FROM cases{where_clause} ORDER BY updated_at DESC"
+        if limit is not None:
+            statement += " LIMIT ?"
+            parameters.append(limit)
+        elif offset > 0:
+            statement += " LIMIT -1"
+        if offset > 0:
+            statement += " OFFSET ?"
+            parameters.append(offset)
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM cases ORDER BY updated_at DESC").fetchall()
+            rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_case(row) for row in rows]
+
+    def count_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        priority: CasePriority | None = None,
+        case_type: str = "",
+        owner: str = "",
+        query: str = "",
+    ) -> int:
+        where_clause, parameters = self._case_filter_query(
+            status=status,
+            priority=priority,
+            case_type=case_type,
+            owner=owner,
+            query=query,
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM cases{where_clause}",
+                tuple(parameters),
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     def get_case(self, case_id: str) -> Case | None:
         with self._connect() as connection:
@@ -206,6 +255,7 @@ class SQLiteCaseRepository(CaseRepository):
             connection.execute("CREATE INDEX IF NOT EXISTS idx_cases_type ON cases (case_type)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_cases_status ON cases (status)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_cases_priority ON cases (priority)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_cases_updated_at ON cases (updated_at DESC)")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS case_links (
@@ -284,6 +334,53 @@ class SQLiteCaseRepository(CaseRepository):
                 "updated_at": self._parse_datetime(row["updated_at"]),
             }
         )
+
+    def _case_filter_query(
+        self,
+        *,
+        status: CaseStatus | None,
+        priority: CasePriority | None,
+        case_type: str,
+        owner: str,
+        query: str,
+    ) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if status:
+            clauses.append("status = ?")
+            parameters.append(status.value)
+        if priority:
+            clauses.append("priority = ?")
+            parameters.append(priority.value)
+        if case_type:
+            clauses.append("case_type = ?")
+            parameters.append(case_type)
+        owner_needle = owner.strip().lower()
+        if owner_needle:
+            clauses.append("lower(owner) LIKE ? ESCAPE '\\'")
+            parameters.append(self._like_value(owner_needle))
+        query_needle = query.strip().lower()
+        if query_needle:
+            searchable_columns = (
+                "id",
+                "case_name",
+                "case_type",
+                "status",
+                "priority",
+                "summary",
+                "owner",
+            )
+            clauses.append(
+                "("
+                + " OR ".join(f"lower(coalesce({column}, '')) LIKE ? ESCAPE '\\'" for column in searchable_columns)
+                + ")"
+            )
+            parameters.extend([self._like_value(query_needle)] * len(searchable_columns))
+        return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), parameters
+
+    def _like_value(self, value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
 
     def _dump_json(self, value: object) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)

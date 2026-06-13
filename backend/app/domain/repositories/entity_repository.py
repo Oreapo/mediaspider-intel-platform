@@ -2,12 +2,35 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..models.entity import EntityRelation, RiskEntity
+from ..models.entity import EntityRelation, RiskEntity, RiskEntityStatus, RiskEntityType
+from ..models.platform import PlatformKey
 
 
 class EntityRepository(ABC):
     @abstractmethod
-    def list_entities(self) -> list[RiskEntity]:
+    def list_entities(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        entity_type: RiskEntityType | None = None,
+        status: RiskEntityStatus | None = None,
+        min_risk_score: float | None = None,
+        query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[RiskEntity]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_entities(
+        self,
+        *,
+        platform: PlatformKey | None = None,
+        entity_type: RiskEntityType | None = None,
+        status: RiskEntityStatus | None = None,
+        min_risk_score: float | None = None,
+        query: str = "",
+    ) -> int:
         raise NotImplementedError
 
     @abstractmethod

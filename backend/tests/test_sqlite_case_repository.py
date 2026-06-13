@@ -97,3 +97,46 @@ def test_app_container_can_switch_case_repository_to_sqlite(tmp_path, monkeypatc
 
     assert sqlite_path.exists()
     assert container.case_service.get_case(case.id).case_name == "SQLite Case"
+
+
+def test_sqlite_case_repository_filters_counts_and_paginates(tmp_path):
+    repository = SQLiteCaseRepository(tmp_path / "storage.sqlite3")
+    now = datetime.utcnow()
+    cases = [
+        _case("case_lead", now).model_copy(
+            update={
+                "case_name": "Lead case 100%",
+                "summary": "Contact abc12345 investigation",
+                "owner": "Alice Zhang",
+                "status": CaseStatus.INVESTIGATING,
+            }
+        ),
+        _case("case_product", now + timedelta(minutes=1)).model_copy(
+            update={
+                "case_name": "Product risk case",
+                "case_type": "product_risk",
+                "priority": CasePriority.MEDIUM,
+                "owner": "Bob",
+            }
+        ),
+        _case("case_topic", now + timedelta(minutes=2)).model_copy(
+            update={
+                "case_name": "Topic watch case",
+                "case_type": "topic_watch",
+                "status": CaseStatus.CLOSED,
+                "priority": CasePriority.LOW,
+                "owner": "Alice Chen",
+            }
+        ),
+    ]
+    for case in cases:
+        repository.save_case(case)
+
+    assert [item.id for item in repository.list_cases(status=CaseStatus.CLOSED)] == ["case_topic"]
+    assert [item.id for item in repository.list_cases(priority=CasePriority.MEDIUM)] == ["case_product"]
+    assert [item.id for item in repository.list_cases(owner="alice")] == ["case_topic", "case_lead"]
+    assert [item.id for item in repository.list_cases(query="abc12345")] == ["case_lead"]
+    assert [item.id for item in repository.list_cases(query="100%")] == ["case_lead"]
+    assert repository.count_cases(case_type="lead_diversion") == 1
+    assert [item.id for item in repository.list_cases(limit=1, offset=1)] == ["case_product"]
+    assert repository.count_cases() == 3

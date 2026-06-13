@@ -34,7 +34,7 @@ class EntityService:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[RiskEntity]:
-        entities, _ = self.list_entities_page(
+        return self.repository.list_entities(
             platform=platform,
             entity_type=entity_type,
             status=status,
@@ -43,7 +43,6 @@ class EntityService:
             limit=limit,
             offset=offset,
         )
-        return entities
 
     def list_entities_page(
         self,
@@ -56,25 +55,17 @@ class EntityService:
         limit: int | None = None,
         offset: int = 0,
     ) -> tuple[list[RiskEntity], int]:
-        entities = self.repository.list_entities()
-        if platform:
-            entities = [entity for entity in entities if entity.platform == platform]
-        if entity_type:
-            entities = [entity for entity in entities if entity.entity_type == entity_type]
-        if status:
-            entities = [entity for entity in entities if entity.status == status]
-        if min_risk_score is not None:
-            entities = [entity for entity in entities if entity.risk_score >= min_risk_score]
-        if query:
-            needle = query.strip().lower()
-            if needle:
-                entities = [entity for entity in entities if self._matches_query(entity, needle)]
-        total = len(entities)
-        if offset > 0:
-            entities = entities[offset:]
-        if limit is not None:
-            entities = entities[:limit]
-        return entities, total
+        filters = {
+            "platform": platform,
+            "entity_type": entity_type,
+            "status": status,
+            "min_risk_score": min_risk_score,
+            "query": query,
+        }
+        return (
+            self.repository.list_entities(**filters, limit=limit, offset=offset),
+            self.repository.count_entities(**filters),
+        )
 
     def get_entity(self, entity_id: str) -> RiskEntity | None:
         return self.repository.get_entity(entity_id)
@@ -380,18 +371,3 @@ class EntityService:
                 fingerprints.add(fingerprint)
                 result.append(ref)
         return result
-
-    def _matches_query(self, entity: RiskEntity, needle: str) -> bool:
-        aliases = entity.profile_json.get("aliases") or []
-        linked_signal_ids = entity.profile_json.get("linked_signal_ids") or []
-        values = [
-            entity.id,
-            entity.entity_type.value,
-            entity.display_name,
-            entity.platform.value,
-            entity.status.value,
-            *aliases,
-            *linked_signal_ids,
-            *entity.source_ref.values(),
-        ]
-        return any(needle in str(value).lower() for value in values if value is not None)
