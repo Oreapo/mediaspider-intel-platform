@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -129,6 +130,34 @@ def test_app_container_can_switch_task_repository_to_sqlite(tmp_path, monkeypatc
 
     assert sqlite_path.exists()
     assert container.task_service.get_task(task.id).task_name == "SQLite Task"
+
+
+def test_sqlite_task_repository_run_leases_are_atomic_and_recover_expired_rows(tmp_path):
+    sqlite_path = tmp_path / "storage.sqlite3"
+    first_repository = SQLiteCollectionTaskRepository(sqlite_path)
+    second_repository = SQLiteCollectionTaskRepository(sqlite_path)
+
+    assert first_repository.supports_run_leases is True
+    assert first_repository.acquire_run_lease("tsk_shared", "run_first", "worker-a", 60) is True
+    assert first_repository.is_run_lease_active("tsk_shared", "run_first") is True
+    assert second_repository.acquire_run_lease("tsk_shared", "run_second", "worker-b", 60) is False
+    assert first_repository.count_active_run_leases() == 1
+    assert second_repository.renew_run_lease("tsk_shared", "run_first", "worker-b", 60) is False
+    assert first_repository.renew_run_lease("tsk_shared", "run_first", "worker-a", 60) is True
+    assert second_repository.release_run_lease("tsk_shared", "run_first", "worker-b") is False
+    assert first_repository.release_run_lease("tsk_shared", "run_first", "worker-a") is True
+    assert first_repository.is_run_lease_active("tsk_shared", "run_first") is False
+    assert second_repository.acquire_run_lease("tsk_shared", "run_second", "worker-b", 60) is True
+
+    with sqlite3.connect(sqlite_path) as connection:
+        connection.execute(
+            "UPDATE task_run_leases SET expires_at = ? WHERE task_id = ?",
+            ((datetime.utcnow() - timedelta(seconds=1)).isoformat(), "tsk_shared"),
+        )
+        connection.commit()
+
+    assert first_repository.acquire_run_lease("tsk_shared", "run_third", "worker-c", 60) is True
+    assert first_repository.count_active_run_leases() == 1
 
 
 def test_sqlite_task_repository_filters_counts_and_paginates(tmp_path):

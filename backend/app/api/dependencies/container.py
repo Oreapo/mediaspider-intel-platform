@@ -80,6 +80,8 @@ class AppContainer:
             self._platform_profile_service.resolve_runtime_auth,
             max_concurrent_runs=int(os.getenv("MEDIASPIDER_TASK_MAX_CONCURRENT_RUNS", "1")),
             queue_timeout_seconds=float(os.getenv("MEDIASPIDER_TASK_QUEUE_TIMEOUT_SECONDS", "300")),
+            lease_seconds=float(os.getenv("MEDIASPIDER_TASK_LEASE_SECONDS", "30")),
+            lease_owner_id=os.getenv("MEDIASPIDER_INSTANCE_ID") or None,
             recover_interrupted_runs=os.getenv(
                 "MEDIASPIDER_TASK_RECOVER_INTERRUPTED_RUNS",
                 "true",

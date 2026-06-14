@@ -58,7 +58,10 @@ const pageMeta = computed(() => {
       description: '查看平台工作流、功能模块、启动方式和常见问题。',
     },
   }
-  return lookup[route.path] ?? lookup['/dashboard']
+  const matchedPath = Object.keys(lookup)
+    .filter((path) => route.path === path || route.path.startsWith(`${path}/`))
+    .sort((left, right) => right.length - left.length)[0]
+  return lookup[matchedPath] ?? lookup['/dashboard']
 })
 </script>
 

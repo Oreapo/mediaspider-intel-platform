@@ -146,15 +146,21 @@ MEDIASPIDER_SCHEDULER_INTERVAL_SECONDS=60
 MEDIASPIDER_SCHEDULER_EXECUTE_CRAWLER=true
 MEDIASPIDER_TASK_MAX_CONCURRENT_RUNS=1
 MEDIASPIDER_TASK_QUEUE_TIMEOUT_SECONDS=300
+MEDIASPIDER_TASK_LEASE_SECONDS=30
+MEDIASPIDER_INSTANCE_ID=backend-1
 MEDIASPIDER_TASK_RECOVER_INTERRUPTED_RUNS=true
 ```
 
 `MEDIASPIDER_TASK_MAX_CONCURRENT_RUNS` 控制单个后端进程同时执行的采集任务数。超出容量的运行会以
 `pending` 状态等待；等待超过 `MEDIASPIDER_TASK_QUEUE_TIMEOUT_SECONDS` 后会记录失败并返回服务繁忙错误。
 
-单进程部署建议保持 `MEDIASPIDER_TASK_RECOVER_INTERRUPTED_RUNS=true`：后端重启时会将遗留的
-`pending` 运行取消、将遗留的 `running` 运行标记为失败，避免同一任务永久被活动运行锁住。
-多进程部署在引入共享租约前应关闭该选项，避免一个进程恢复另一个仍在执行的任务。
+SQLite 任务仓储会为每次真实采集创建共享运行租约，并按租约时长的三分之一自动续租。同一 SQLite
+文件上的多个后端进程不能重复执行同一任务；租约丢失时当前运行会终止并记录失败。
+`MEDIASPIDER_INSTANCE_ID` 应为每个后端实例设置不同且稳定的值，便于在调度器状态中定位租约持有者。
+
+建议保持 `MEDIASPIDER_TASK_RECOVER_INTERRUPTED_RUNS=true`。后端启动时会跳过仍有有效租约的运行，
+只将没有租约或租约已过期的遗留 `pending` 运行取消，并将遗留 `running` 运行标记为失败。JSON 任务仓储
+不支持共享租约，仅适用于单进程开发模式；多进程部署必须让所有实例共享同一个 SQLite 文件。
 
 ## 9. 常用命令
 

@@ -29,7 +29,7 @@ import { downloadEvidencePacket, generateEvidencePacket } from '../api/evidence'
 import { requestConfirm } from '../lib/confirm'
 import { lastPageOffset } from '../lib/pagination'
 import { required, type ValidationErrors } from '../lib/validation'
-import type { AnalysisOutput, CaseDetail } from '../types'
+import type { AnalysisOutput, CaseDetail, CaseTimelineItem } from '../types'
 
 const {
   items: caseItems,
@@ -478,16 +478,22 @@ function caseStatusTone(status: string) {
 }
 
 function auditActionLabel(action: string) {
-  const labels: Record<string, string> = {
-    'case.create': '创建案件',
-    'case.update': '更新案件',
-    'case.delete': '删除案件',
-    'case.link.add': '挂接对象',
-    'case.link.delete': '移除挂接',
-    'case.note.add': '新增备注',
-    'case.note.delete': '删除备注',
-  }
-  return labels[action] || action
+  const key = `auditAction.${action}`
+  const translated = t(key)
+  return translated === key ? action : translated
+}
+
+function timelineTitle(item: CaseTimelineItem) {
+  if (item.event_type !== 'case_status_changed') return item.title
+  const previousStatus = String(item.source_ref.previous_status || '')
+  const newStatus = String(item.source_ref.new_status || '')
+  return `${labelValue(previousStatus)} → ${labelValue(newStatus)}`
+}
+
+function timelineEventLabel(eventType: string) {
+  const key = `cases.timelineEvent.${eventType}`
+  const translated = t(key)
+  return translated === key ? eventType : translated
 }
 
 function labelValue(value: string) {
@@ -810,6 +816,39 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
           </div>
         </section>
 
+        <section class="detail-section status-history-section">
+          <div>
+            <h3>{{ t('cases.statusHistory') }}</h3>
+            <p class="muted">{{ t('cases.statusHistoryDescription') }}</p>
+          </div>
+          <div v-if="selectedDetail.status_history.length" class="status-history-list">
+            <article
+              v-for="item in selectedDetail.status_history"
+              :key="item.source_event_id || `${item.new_status}-${item.changed_at}`"
+              class="status-transition"
+            >
+              <div class="status-transition-main">
+                <strong v-if="item.previous_status">
+                  {{ labelValue(item.previous_status) }}
+                  <span class="status-arrow" aria-hidden="true">→</span>
+                  {{ labelValue(item.new_status) }}
+                </strong>
+                <strong v-else>{{ t('cases.statusInitial', { status: labelValue(item.new_status) }) }}</strong>
+                <span>
+                  {{ t('cases.statusChangedBy', { actor: item.actor_username || t('cases.systemActor') }) }}
+                </span>
+              </div>
+              <StatusBadge :label="labelValue(item.new_status)" :tone="caseStatusTone(item.new_status)" />
+              <time>{{ formatDate(item.changed_at) }}</time>
+            </article>
+          </div>
+          <EmptyState
+            v-else
+            :title="t('cases.noStatusHistory')"
+            :description="t('cases.noStatusHistoryDescription')"
+          />
+        </section>
+
         <section class="detail-section">
           <h3>{{ t('cases.linkedObjects') }}</h3>
           <article v-for="item in selectedDetail.links" :key="item.id" class="compact-item">
@@ -861,8 +900,8 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
           <h3>{{ t('cases.timeline') }}</h3>
           <article v-for="item in selectedDetail.timeline" :key="`${item.event_type}-${item.target_id}-${item.event_time}`" class="timeline-item">
             <span>{{ formatDate(item.event_time) }}</span>
-            <strong>{{ item.title }}</strong>
-            <p>{{ item.event_type }} · {{ item.target_type }}</p>
+            <strong>{{ timelineTitle(item) }}</strong>
+            <p>{{ timelineEventLabel(item.event_type) }} · {{ item.target_type }}</p>
           </article>
         </section>
 
@@ -1025,6 +1064,74 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
 
 .evidence-tree-section {
   grid-column: 1 / -1;
+}
+
+.status-history-section {
+  grid-column: 1 / -1;
+}
+
+.status-history-list {
+  display: grid;
+  gap: 0;
+  margin-left: 7px;
+  border-left: 2px solid rgba(15, 118, 110, 0.24);
+}
+
+.status-transition {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(150px, auto);
+  gap: 16px;
+  align-items: center;
+  padding: 4px 0 18px 24px;
+}
+
+.status-transition:last-child {
+  padding-bottom: 4px;
+}
+
+.status-transition::before {
+  position: absolute;
+  top: 10px;
+  left: -7px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #0f766e;
+  box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.3);
+  content: '';
+}
+
+.status-transition-main {
+  min-width: 0;
+}
+
+.status-transition-main strong,
+.status-transition-main span {
+  display: block;
+}
+
+.status-transition-main strong {
+  overflow-wrap: anywhere;
+}
+
+.status-transition-main > span,
+.status-transition time {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.status-transition time {
+  margin-top: 0;
+  text-align: right;
+}
+
+.status-arrow {
+  display: inline;
+  padding: 0 6px;
+  color: #0f766e;
 }
 
 .evidence-tree {
@@ -1287,6 +1394,15 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
   .tree-branches,
   .filter-form {
     grid-template-columns: 1fr;
+  }
+
+  .status-transition {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .status-transition time {
+    grid-column: 1 / -1;
+    text-align: left;
   }
 }
 </style>

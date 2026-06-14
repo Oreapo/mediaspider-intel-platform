@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from threading import RLock
 from typing import Protocol
 
 from ..domain.models.task import CollectionTask, TaskMode, TaskRun
@@ -30,6 +33,9 @@ class CrawlerRunner(Protocol):
     def run(self, task: CollectionTask, run: TaskRun) -> CrawlerRunResult:
         ...
 
+    def cancel(self, run_id: str) -> bool:
+        ...
+
 
 class MediaCrawlerProcessRunner:
     def __init__(
@@ -42,32 +48,48 @@ class MediaCrawlerProcessRunner:
         self.media_crawler_root = media_crawler_root
         self.storage_root = storage_root
         self.command_prefix = command_prefix or ["uv", "run", "python", "main.py"]
+        self._process_lock = RLock()
+        self._processes: dict[str, subprocess.Popen[str]] = {}
+        self._active_run_ids: set[str] = set()
+        self._cancelled_run_ids: set[str] = set()
 
     def run(self, task: CollectionTask, run: TaskRun) -> CrawlerRunResult:
-        self._validate_root()
         started_at = datetime.utcnow()
         output_root = self.storage_root / "crawler_run_outputs" / run.id
         output_root.mkdir(parents=True, exist_ok=True)
         log_path = self.storage_root / "crawler_logs" / f"{run.id}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        command, redacted_command = self._build_command(task, output_root)
-        timeout_seconds = self._positive_int(
-            task.runtime_payload_json.get("timeout_seconds"),
-            default=3600,
-            minimum=30,
-        )
-
-        log_lines = [
-            f"run_id={run.id}",
-            f"task_id={task.id}",
-            f"started_at={started_at.isoformat()}",
-            "command=" + " ".join(redacted_command),
-            "",
-        ]
-        log_path.write_text("\n".join(log_lines), encoding="utf-8")
+        with self._process_lock:
+            self._active_run_ids.add(run.id)
 
         try:
-            completed = subprocess.run(
+            self._validate_root()
+            command, redacted_command = self._build_command(task, output_root)
+            timeout_seconds = self._positive_int(
+                task.runtime_payload_json.get("timeout_seconds"),
+                default=3600,
+                minimum=30,
+            )
+            log_lines = [
+                f"run_id={run.id}",
+                f"task_id={task.id}",
+                f"started_at={started_at.isoformat()}",
+                "command=" + " ".join(redacted_command),
+                "",
+            ]
+            log_path.write_text("\n".join(log_lines), encoding="utf-8")
+
+            if self._was_cancelled(run.id):
+                return self._cancelled_result(
+                    log_path=log_path,
+                    output_root=output_root,
+                    command=command,
+                    redacted_command=redacted_command,
+                    started_at=started_at,
+                )
+
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+            process = subprocess.Popen(
                 command,
                 cwd=self.media_crawler_root,
                 stdout=subprocess.PIPE,
@@ -75,41 +97,128 @@ class MediaCrawlerProcessRunner:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=timeout_seconds,
+                creationflags=creation_flags,
+                start_new_session=os.name != "nt",
             )
-            finished_at = datetime.utcnow()
-            with log_path.open("a", encoding="utf-8") as handle:
-                handle.write(completed.stdout or "")
-                handle.write("\n")
-                handle.write(f"finished_at={finished_at.isoformat()}\n")
-                handle.write(f"return_code={completed.returncode}\n")
-            return CrawlerRunResult(
-                return_code=completed.returncode,
-                log_path=log_path,
-                output_files=self._discover_output_files(output_root),
-                command=command,
-                redacted_command=redacted_command,
-                started_at=started_at,
-                finished_at=finished_at,
-                error_message="" if completed.returncode == 0 else f"MediaCrawler exited with code {completed.returncode}",
+            with self._process_lock:
+                self._processes[run.id] = process
+                cancel_after_start = run.id in self._cancelled_run_ids
+            if cancel_after_start:
+                self._terminate_process_tree(process)
+
+            try:
+                stdout, _ = process.communicate(timeout=timeout_seconds)
+                cancelled = self._was_cancelled(run.id)
+                return_code = 130 if cancelled else process.returncode
+                error_message = ""
+                if cancelled:
+                    error_message = "MediaCrawler run cancelled"
+                elif return_code != 0:
+                    error_message = f"MediaCrawler exited with code {return_code}"
+                finished_at = datetime.utcnow()
+                with log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(stdout or "")
+                    handle.write("\n")
+                    handle.write(f"finished_at={finished_at.isoformat()}\n")
+                    handle.write(f"return_code={return_code}\n")
+                    if cancelled:
+                        handle.write("cancelled=true\n")
+                return CrawlerRunResult(
+                    return_code=return_code,
+                    log_path=log_path,
+                    output_files=self._discover_output_files(output_root),
+                    command=command,
+                    redacted_command=redacted_command,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    error_message=error_message,
+                )
+            except subprocess.TimeoutExpired:
+                self._terminate_process_tree(process)
+                stdout, _ = process.communicate()
+                finished_at = datetime.utcnow()
+                with log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(stdout or "")
+                    handle.write("\n")
+                    handle.write(f"finished_at={finished_at.isoformat()}\n")
+                    handle.write(f"timeout_seconds={timeout_seconds}\n")
+                return CrawlerRunResult(
+                    return_code=124,
+                    log_path=log_path,
+                    output_files=self._discover_output_files(output_root),
+                    command=command,
+                    redacted_command=redacted_command,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    error_message=f"MediaCrawler timed out after {timeout_seconds} seconds",
+                )
+        finally:
+            with self._process_lock:
+                self._processes.pop(run.id, None)
+                self._active_run_ids.discard(run.id)
+                self._cancelled_run_ids.discard(run.id)
+
+    def cancel(self, run_id: str) -> bool:
+        with self._process_lock:
+            if run_id not in self._active_run_ids:
+                return False
+            self._cancelled_run_ids.add(run_id)
+            process = self._processes.get(run_id)
+            if process is None or process.poll() is not None:
+                return True
+        self._terminate_process_tree(process)
+        return True
+
+    def _was_cancelled(self, run_id: str) -> bool:
+        with self._process_lock:
+            return run_id in self._cancelled_run_ids
+
+    def _cancelled_result(
+        self,
+        *,
+        log_path: Path,
+        output_root: Path,
+        command: list[str],
+        redacted_command: list[str],
+        started_at: datetime,
+    ) -> CrawlerRunResult:
+        finished_at = datetime.utcnow()
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"finished_at={finished_at.isoformat()}\n")
+            handle.write("return_code=130\n")
+            handle.write("cancelled=true\n")
+        return CrawlerRunResult(
+            return_code=130,
+            log_path=log_path,
+            output_files=self._discover_output_files(output_root),
+            command=command,
+            redacted_command=redacted_command,
+            started_at=started_at,
+            finished_at=finished_at,
+            error_message="MediaCrawler run cancelled",
+        )
+
+    def _terminate_process_tree(self, process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
             )
-        except subprocess.TimeoutExpired as exc:
-            finished_at = datetime.utcnow()
-            with log_path.open("a", encoding="utf-8") as handle:
-                handle.write(exc.stdout or "")
-                handle.write("\n")
-                handle.write(f"finished_at={finished_at.isoformat()}\n")
-                handle.write(f"timeout_seconds={timeout_seconds}\n")
-            return CrawlerRunResult(
-                return_code=124,
-                log_path=log_path,
-                output_files=self._discover_output_files(output_root),
-                command=command,
-                redacted_command=redacted_command,
-                started_at=started_at,
-                finished_at=finished_at,
-                error_message=f"MediaCrawler timed out after {timeout_seconds} seconds",
-            )
+            if completed.returncode != 0 and process.poll() is None:
+                process.terminate()
+            return
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=5)
+        except ProcessLookupError:
+            return
+        except subprocess.TimeoutExpired:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
 
     def diagnose(self, task: CollectionTask, run_id: str = "dry-run") -> dict[str, object]:
         output_root = self.storage_root / "crawler_run_outputs" / run_id

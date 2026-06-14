@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..dependencies import ANALYST_ROLES, READ_ROLES, get_audit_service, get_case_service, require_roles
@@ -7,6 +9,8 @@ from ..schemas.case import CaseCreateRequest, CaseLinkCreateRequest, CaseNoteCre
 from ...application.audit_service import AuditService
 from ...application.auth_service import AuthUser
 from ...application.case_service import CaseService
+from ...domain.models.audit import AuditEvent
+from ...domain.models.case import Case
 from ...domain.models.case import CasePriority, CaseStatus
 
 
@@ -50,7 +54,13 @@ def create_case(
         target_type="case",
         target_id=case.id,
         summary=f"创建案件：{case.case_name}",
-        metadata_json={"case_type": case.case_type, "priority": case.priority.value},
+        metadata_json={
+            "case_type": case.case_type,
+            "priority": case.priority.value,
+            "previous_status": None,
+            "new_status": case.status.value,
+            "status_changed": True,
+        },
     )
     return {"message": "Case created", "case": case.model_dump(mode="json")}
 
@@ -64,8 +74,11 @@ def get_case_detail(
     detail = service.get_case_detail(case_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Case not found")
-    audit_events = audit_service.list_events(target_type="case", target_id=case_id, limit=100)
-    detail["audit_events"] = [event.model_dump(mode="json") for event in audit_events]
+    audit_events = audit_service.list_events(target_type="case", target_id=case_id)
+    status_history = _build_case_status_history(detail["case"], audit_events)
+    detail["timeline"] = _merge_case_status_timeline(detail["timeline"], status_history)
+    detail["status_history"] = status_history
+    detail["audit_events"] = [event.model_dump(mode="json") for event in audit_events[:100]]
     return detail
 
 
@@ -77,17 +90,30 @@ def update_case(
     audit_service: AuditService = Depends(get_audit_service),
     actor: AuthUser = Depends(require_roles(*ANALYST_ROLES)),
 ):
+    previous_case = service.get_case(case_id)
     try:
         case = service.update_case(case_id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    changed_fields = sorted(payload.model_dump(exclude_unset=True).keys())
+    metadata_json: dict[str, Any] = {"fields": changed_fields}
+    if payload.status is not None and previous_case is not None:
+        previous_status = previous_case.status.value
+        new_status = case.status.value
+        metadata_json.update(
+            {
+                "previous_status": previous_status,
+                "new_status": new_status,
+                "status_changed": previous_status != new_status,
+            }
+        )
     audit_service.record(
         action="case.update",
         actor=actor,
         target_type="case",
         target_id=case.id,
         summary=f"更新案件：{case.case_name}",
-        metadata_json={"fields": sorted(payload.model_dump(exclude_unset=True).keys())},
+        metadata_json=metadata_json,
     )
     return {"message": "Case updated", "case": case.model_dump(mode="json")}
 
@@ -203,8 +229,106 @@ def delete_case_note(
 
 
 @router.get("/{case_id}/timeline")
-def get_case_timeline(case_id: str, service: CaseService = Depends(get_case_service)):
+def get_case_timeline(
+    case_id: str,
+    service: CaseService = Depends(get_case_service),
+    audit_service: AuditService = Depends(get_audit_service),
+):
     try:
-        return {"timeline": service.build_timeline(case_id)}
+        timeline = service.build_timeline(case_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    case = service.get_case(case_id)
+    audit_events = audit_service.list_events(target_type="case", target_id=case_id)
+    status_history = _build_case_status_history(case, audit_events) if case is not None else []
+    return {"timeline": _merge_case_status_timeline(timeline, status_history)}
+
+
+def _build_case_status_history(
+    case: Case | dict[str, Any],
+    audit_events: list[AuditEvent],
+) -> list[dict[str, Any]]:
+    case_payload = case.model_dump(mode="json") if isinstance(case, Case) else case
+    history: list[dict[str, Any]] = []
+    create_event: AuditEvent | None = None
+
+    for event in sorted(audit_events, key=lambda item: (item.created_at, item.id)):
+        metadata = event.metadata_json
+        if event.action == "case.create":
+            create_event = event
+            continue
+        if event.action != "case.update":
+            continue
+        previous_status = metadata.get("previous_status")
+        new_status = metadata.get("new_status")
+        if not isinstance(previous_status, str) or not isinstance(new_status, str):
+            continue
+        if previous_status == new_status or metadata.get("status_changed") is False:
+            continue
+        history.append(
+            {
+                "previous_status": previous_status,
+                "new_status": new_status,
+                "changed_at": event.created_at.isoformat(),
+                "actor_username": event.actor_username,
+                "actor_role": event.actor_role,
+                "source_event_id": event.id,
+            }
+        )
+
+    initial_status = (
+        history[0]["previous_status"]
+        if history
+        else str(case_payload.get("status") or CaseStatus.OPEN.value)
+    )
+    create_metadata = create_event.metadata_json if create_event is not None else {}
+    recorded_initial_status = create_metadata.get("new_status")
+    if isinstance(recorded_initial_status, str):
+        initial_status = recorded_initial_status
+    history.insert(
+        0,
+        {
+            "previous_status": None,
+            "new_status": initial_status,
+            "changed_at": (
+                create_event.created_at.isoformat()
+                if create_event is not None
+                else str(case_payload.get("created_at") or "")
+            ),
+            "actor_username": create_event.actor_username if create_event is not None else "",
+            "actor_role": create_event.actor_role if create_event is not None else "",
+            "source_event_id": create_event.id if create_event is not None else "",
+        },
+    )
+    return history
+
+
+def _merge_case_status_timeline(
+    timeline: list[dict[str, Any]],
+    status_history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = list(timeline)
+    for item in status_history:
+        previous_status = item.get("previous_status")
+        if not previous_status:
+            continue
+        new_status = str(item.get("new_status") or "")
+        merged.append(
+            {
+                "event_type": "case_status_changed",
+                "event_time": str(item.get("changed_at") or ""),
+                "target_type": "case",
+                "target_id": str(item.get("source_event_id") or ""),
+                "title": f"{previous_status} -> {new_status}",
+                "source_ref": {
+                    "previous_status": previous_status,
+                    "new_status": new_status,
+                    "actor_username": item.get("actor_username") or "",
+                    "audit_event_id": item.get("source_event_id") or "",
+                },
+            }
+        )
+    return sorted(
+        merged,
+        key=lambda item: (item["event_time"], item["event_type"], item["target_id"]),
+    )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from ..dependencies import OPERATOR_ROLES, READ_ROLES, get_audit_service, get_scheduler_service, get_task_service, require_roles
 from ..schemas.task import CollectionTaskCreateRequest, CollectionTaskUpdateRequest, ScheduledTaskRunRequest, TaskRunStartRequest
@@ -115,8 +115,14 @@ def get_scheduler_status(
         "queued_runs": scheduler.queued_runs,
         "active_task_runs": service.active_task_runs,
         "queued_task_runs": service.queued_task_runs,
+        "queued_task_priority_counts": service.queued_task_priority_counts,
+        "background_worker_count": service.background_worker_count,
         "max_concurrent_task_runs": service.max_concurrent_runs,
         "task_queue_timeout_seconds": service.queue_timeout_seconds,
+        "run_leases_supported": service.run_leases_supported,
+        "active_run_leases": service.active_run_leases,
+        "task_lease_seconds": service.lease_seconds,
+        "lease_owner_id": service.lease_owner_id if service.run_leases_supported else "",
         "recovered_task_runs": service.recovered_task_runs,
         "interval_seconds": scheduler.interval_seconds,
         "execute_crawler": scheduler.execute_crawler,
@@ -273,8 +279,12 @@ def cancel_task_run(
         actor=actor,
         target_type="task_run",
         target_id=run.id,
-        summary=f"取消排队中的采集任务运行：{run.id}",
-        metadata_json={"task_id": task_id, "status": run.status.value},
+        summary=f"取消采集任务运行：{run.id}",
+        metadata_json={
+            "task_id": task_id,
+            "status": run.status.value,
+            "previous_status": run.run_result_json.get("previous_status"),
+        },
     )
     return {"message": "Task run cancelled", "run": run.model_dump(mode="json")}
 
@@ -282,6 +292,7 @@ def cancel_task_run(
 @router.post("/{task_id}/runs", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
 def start_task_run(
     task_id: str,
+    response: Response,
     payload: TaskRunStartRequest | None = None,
     service: CollectionTaskService = Depends(get_task_service),
     audit_service: AuditService = Depends(get_audit_service),
@@ -289,11 +300,19 @@ def start_task_run(
 ):
     start_payload = payload or TaskRunStartRequest()
     try:
-        run = service.start_run(
-            task_id,
-            trigger_type=start_payload.trigger_type,
-            execute_crawler=start_payload.execute_crawler,
-        )
+        if start_payload.execute_crawler:
+            run = service.submit_run(
+                task_id,
+                trigger_type=start_payload.trigger_type,
+                execute_crawler=True,
+            )
+            response.status_code = status.HTTP_202_ACCEPTED
+        else:
+            run = service.start_run(
+                task_id,
+                trigger_type=start_payload.trigger_type,
+                execute_crawler=False,
+            )
     except ValueError as exc:
         detail = str(exc)
         lowered_detail = detail.lower()
@@ -301,7 +320,7 @@ def start_task_run(
             status_code = 404
         elif "already has active run" in lowered_detail:
             status_code = 409
-        elif "queue timed out" in lowered_detail:
+        elif "queue timed out" in lowered_detail or "lease lost" in lowered_detail:
             status_code = 503
         else:
             status_code = 400
@@ -319,4 +338,7 @@ def start_task_run(
             "status": run.status.value,
         },
     )
-    return {"message": "Task run completed" if start_payload.execute_crawler else "Task run started", "run": run.model_dump(mode="json")}
+    return {
+        "message": "Task run accepted" if start_payload.execute_crawler else "Task run started",
+        "run": run.model_dump(mode="json"),
+    }

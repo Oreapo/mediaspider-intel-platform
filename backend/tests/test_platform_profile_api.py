@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -122,8 +123,18 @@ def test_task_run_applies_platform_auth_profile(tmp_path):
         assert runner.last_runtime_payload["headless"] is True
 
         run_response = client.post(f"/api/tasks/{task['id']}/runs")
-        assert run_response.status_code == 200
-        run = run_response.json()["run"]
+        assert run_response.status_code == 202
+        submitted = run_response.json()["run"]
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            run = client.get(
+                f"/api/tasks/{task['id']}/runs/{submitted['id']}"
+            ).json()["run"]
+            if run["status"] in {"succeeded", "failed", "cancelled"}:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError(f"Task run did not finish: {submitted['id']}")
         assert run["status"] == "succeeded"
         assert run["task_snapshot_json"]["runtime_payload_json"]["auth_profile_id"] == profile["id"]
         assert runner.last_runtime_payload["max_concurrency_num"] == 3

@@ -95,6 +95,13 @@ export interface TaskRun {
   updated_at: string
 }
 
+export interface TaskRunFailureDiagnosis {
+  code: string
+  retryable: boolean
+  suggestions: string[]
+  return_code: number | null
+}
+
 export interface SchedulerRunHistoryItem {
   ran_at: string
   status: string
@@ -110,8 +117,14 @@ export interface SchedulerStatus {
   queued_runs: number
   active_task_runs: number
   queued_task_runs: number
+  queued_task_priority_counts: Record<string, number>
+  background_worker_count: number
   max_concurrent_task_runs: number
   task_queue_timeout_seconds: number
+  run_leases_supported: boolean
+  active_run_leases: number
+  task_lease_seconds: number
+  lease_owner_id: string
   recovered_task_runs: number
   interval_seconds: number
   execute_crawler: boolean
@@ -258,6 +271,15 @@ export interface CaseTimelineItem {
   source_ref: Record<string, unknown>
 }
 
+export interface CaseStatusHistoryItem {
+  previous_status: string | null
+  new_status: string
+  changed_at: string
+  actor_username: string
+  actor_role: string
+  source_event_id: string
+}
+
 export interface CaseDetail {
   case: CaseRecord
   links: CaseLink[]
@@ -270,6 +292,7 @@ export interface CaseDetail {
     evidence_packets: EvidencePacket[]
   }
   timeline: CaseTimelineItem[]
+  status_history: CaseStatusHistoryItem[]
   audit_events: AuditEvent[]
 }
 

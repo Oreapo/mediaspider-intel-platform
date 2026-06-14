@@ -132,11 +132,22 @@ def test_case_can_attach_objects_add_note_and_build_timeline(tmp_path):
             json={"author": "analyst", "body": "已确认联系方式与内容记录有关联。"},
         )
         assert note_response.status_code == 200
+        investigating_response = client.patch(
+            f"/api/cases/{case_id}",
+            json={"status": "investigating"},
+        )
+        ready_response = client.patch(
+            f"/api/cases/{case_id}",
+            json={"status": "ready_for_evidence"},
+        )
+        assert investigating_response.status_code == 200
+        assert ready_response.status_code == 200
 
         detail_response = client.get(f"/api/cases/{case_id}")
         assert detail_response.status_code == 200
         detail = detail_response.json()
         assert detail["case"]["case_name"] == "导流链路专项"
+        assert detail["case"]["status"] == "ready_for_evidence"
         assert len(detail["links"]) == 4
         assert len(detail["notes"]) == 1
         assert detail["objects"]["datasets"][0]["id"] == dataset_id
@@ -145,6 +156,37 @@ def test_case_can_attach_objects_add_note_and_build_timeline(tmp_path):
         assert detail["objects"]["analysis_outputs"][0]["id"] == output_id
         assert {event["action"] for event in detail["audit_events"]} >= {"case.create", "case.link.add", "case.note.add"}
         assert all(event["target_type"] == "case" for event in detail["audit_events"])
+        assert [item["new_status"] for item in detail["status_history"]] == [
+            "open",
+            "investigating",
+            "ready_for_evidence",
+        ]
+        assert [item["previous_status"] for item in detail["status_history"]] == [
+            None,
+            "open",
+            "investigating",
+        ]
+        audit_events_by_id = {event["id"]: event for event in detail["audit_events"]}
+        assert all(item["actor_username"] for item in detail["status_history"])
+        assert all(
+            item["actor_username"] == audit_events_by_id[item["source_event_id"]]["actor_username"]
+            for item in detail["status_history"]
+        )
+        status_update_events = [
+            event
+            for event in detail["audit_events"]
+            if event["action"] == "case.update" and event["metadata_json"].get("status_changed")
+        ]
+        assert [
+            (
+                event["metadata_json"]["previous_status"],
+                event["metadata_json"]["new_status"],
+            )
+            for event in reversed(status_update_events)
+        ] == [
+            ("open", "investigating"),
+            ("investigating", "ready_for_evidence"),
+        ]
 
         timeline_response = client.get(f"/api/cases/{case_id}/timeline")
         assert timeline_response.status_code == 200
@@ -156,6 +198,7 @@ def test_case_can_attach_objects_add_note_and_build_timeline(tmp_path):
         assert "entity_attached" in event_types
         assert "analysis_output_attached" in event_types
         assert "note_added" in event_types
+        assert event_types.count("case_status_changed") == 2
         assert all("source_ref" in item for item in timeline)
     finally:
         set_container(original_container)

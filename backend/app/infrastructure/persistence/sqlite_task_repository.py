@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -264,6 +264,124 @@ class SQLiteCollectionTaskRepository(CollectionTaskRepository):
             connection.commit()
         return run
 
+    @property
+    def supports_run_leases(self) -> bool:
+        return True
+
+    def acquire_run_lease(
+        self,
+        task_id: str,
+        run_id: str,
+        owner_id: str,
+        lease_seconds: float,
+    ) -> bool:
+        acquired_at = datetime.utcnow()
+        expires_at = acquired_at + timedelta(seconds=max(1.0, lease_seconds))
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM task_run_leases WHERE expires_at <= ?",
+                (acquired_at.isoformat(),),
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO task_run_leases (
+                    task_id,
+                    run_id,
+                    owner_id,
+                    acquired_at,
+                    renewed_at,
+                    expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                    run_id = excluded.run_id,
+                    owner_id = excluded.owner_id,
+                    acquired_at = excluded.acquired_at,
+                    renewed_at = excluded.renewed_at,
+                    expires_at = excluded.expires_at
+                WHERE task_run_leases.expires_at <= excluded.acquired_at
+                   OR (
+                       task_run_leases.run_id = excluded.run_id
+                       AND task_run_leases.owner_id = excluded.owner_id
+                   )
+                """,
+                (
+                    task_id,
+                    run_id,
+                    owner_id,
+                    acquired_at.isoformat(),
+                    acquired_at.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
+    def renew_run_lease(
+        self,
+        task_id: str,
+        run_id: str,
+        owner_id: str,
+        lease_seconds: float,
+    ) -> bool:
+        renewed_at = datetime.utcnow()
+        expires_at = renewed_at + timedelta(seconds=max(1.0, lease_seconds))
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE task_run_leases
+                SET renewed_at = ?, expires_at = ?
+                WHERE task_id = ?
+                  AND run_id = ?
+                  AND owner_id = ?
+                  AND expires_at > ?
+                """,
+                (
+                    renewed_at.isoformat(),
+                    expires_at.isoformat(),
+                    task_id,
+                    run_id,
+                    owner_id,
+                    renewed_at.isoformat(),
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
+    def release_run_lease(self, task_id: str, run_id: str, owner_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM task_run_leases
+                WHERE task_id = ? AND run_id = ? AND owner_id = ?
+                """,
+                (task_id, run_id, owner_id),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
+    def is_run_lease_active(self, task_id: str, run_id: str) -> bool:
+        current = datetime.utcnow().isoformat()
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1
+                FROM task_run_leases
+                WHERE task_id = ? AND run_id = ? AND expires_at > ?
+                """,
+                (task_id, run_id, current),
+            ).fetchone()
+        return row is not None
+
+    def count_active_run_leases(self) -> int:
+        current = datetime.utcnow().isoformat()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM task_run_leases WHERE expires_at <= ?", (current,))
+            row = connection.execute("SELECT COUNT(*) FROM task_run_leases").fetchone()
+            connection.commit()
+        return int(row[0]) if row is not None else 0
+
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -317,6 +435,21 @@ class SQLiteCollectionTaskRepository(CollectionTaskRepository):
             connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_status ON task_runs (status)")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_runs_task_updated ON task_runs (task_id, updated_at DESC)"
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS task_run_leases (
+                    task_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL UNIQUE,
+                    owner_id TEXT NOT NULL,
+                    acquired_at TEXT NOT NULL,
+                    renewed_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_task_run_leases_expires ON task_run_leases (expires_at)"
             )
             connection.commit()
 

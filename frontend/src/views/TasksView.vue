@@ -44,6 +44,7 @@ const form = ref({
   primary_input: '',
   notes: '',
   start_page: 1,
+  queue_priority: 'normal',
   enable_comments: true,
   enable_sub_comments: false,
   headless: false,
@@ -191,6 +192,7 @@ async function submitTask() {
       task_payload_json: taskPayload,
       runtime_payload_json: {
         start_page: form.value.start_page,
+        queue_priority: form.value.queue_priority,
         enable_comments: form.value.enable_comments,
         enable_sub_comments: form.value.enable_sub_comments,
         headless: form.value.headless,
@@ -270,7 +272,7 @@ async function runAction(type: 'enable' | 'disable' | 'run', taskId: string) {
       actionMessage.value =
         run.status === 'succeeded'
           ? t('tasks.runCompleted')
-          : t('tasks.runStatus', { status: labelValue(run.status) })
+          : t('tasks.runAccepted', { status: labelValue(run.status) })
     } else {
       actionMessage.value = type === 'enable' ? t('tasks.enabledMessage') : t('tasks.disabledMessage')
     }
@@ -369,6 +371,21 @@ function schedulerTriggerLabel(triggerType?: string) {
   return triggerType === 'manual' ? t('tasks.schedulerManual') : t('tasks.schedulerBackground')
 }
 
+function queuedPrioritySummary(status: SchedulerStatus) {
+  return ['critical', 'high', 'normal', 'low']
+    .map((priority) => `${labelValue(priority)} ${status.queued_task_priority_counts[priority] || 0}`)
+    .join(' · ')
+}
+
+function runLeaseDetail(status: SchedulerStatus) {
+  if (!status.run_leases_supported) return t('tasks.runLeaseUnavailableDetail')
+  return t('tasks.runLeaseDetail', {
+    count: status.active_run_leases,
+    seconds: status.task_lease_seconds,
+    owner: status.lease_owner_id,
+  })
+}
+
 function labelValue(value: string) {
   const key = `enum.${value}`
   const translated = t(key)
@@ -442,11 +459,23 @@ onMounted(loadSchedulerStatus)
 
         </div>
 
-        <label class="field">
-          <span>{{ t('tasks.startPage') }}</span>
-          <input v-model.number="form.start_page" min="1" step="1" type="number" />
-          <FieldError :message="formErrors.start_page" />
-        </label>
+        <div class="grid-two">
+          <label class="field">
+            <span>{{ t('tasks.startPage') }}</span>
+            <input v-model.number="form.start_page" min="1" step="1" type="number" />
+            <FieldError :message="formErrors.start_page" />
+          </label>
+
+          <label class="field">
+            <span>{{ t('tasks.queuePriority') }}</span>
+            <select v-model="form.queue_priority">
+              <option value="low">{{ t('enum.low') }}</option>
+              <option value="normal">{{ t('enum.normal') }}</option>
+              <option value="high">{{ t('enum.high') }}</option>
+              <option value="critical">{{ t('enum.critical') }}</option>
+            </select>
+          </label>
+        </div>
 
         <label class="field">
           <span>{{ inputLabel }}</span>
@@ -518,8 +547,23 @@ onMounted(loadSchedulerStatus)
           <strong>{{ schedulerStatus.queued_task_runs }}</strong>
         </article>
         <article class="scheduler-card">
+          <span>{{ t('tasks.backgroundWorkers') }}</span>
+          <strong>{{ schedulerStatus.background_worker_count }} / {{ schedulerStatus.max_concurrent_task_runs }}</strong>
+        </article>
+        <article class="scheduler-card">
+          <span>{{ t('tasks.queuedPriorityBreakdown') }}</span>
+          <strong>{{ queuedPrioritySummary(schedulerStatus) }}</strong>
+        </article>
+        <article class="scheduler-card">
           <span>{{ t('tasks.taskQueueTimeout') }}</span>
           <strong>{{ schedulerStatus.task_queue_timeout_seconds }}s</strong>
+        </article>
+        <article class="scheduler-card">
+          <span>{{ t('tasks.runLeaseProtection') }}</span>
+          <strong>
+            {{ schedulerStatus.run_leases_supported ? t('tasks.runLeaseEnabled') : t('tasks.runLeaseUnavailable') }}
+          </strong>
+          <small>{{ runLeaseDetail(schedulerStatus) }}</small>
         </article>
         <article class="scheduler-card">
           <span>{{ t('tasks.recoveredRuns') }}</span>
@@ -981,6 +1025,15 @@ onMounted(loadSchedulerStatus)
   display: block;
   margin-top: 6px;
   font-size: 22px;
+}
+
+.scheduler-card small {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .scheduler-history {

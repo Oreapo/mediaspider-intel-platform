@@ -74,3 +74,34 @@ class CollectionTaskRepository(ABC):
     @abstractmethod
     def save_run(self, run: TaskRun) -> TaskRun:
         raise NotImplementedError
+
+    @property
+    def supports_run_leases(self) -> bool:
+        return False
+
+    def acquire_run_lease(
+        self,
+        task_id: str,
+        run_id: str,
+        owner_id: str,
+        lease_seconds: float,
+    ) -> bool:
+        return True
+
+    def renew_run_lease(
+        self,
+        task_id: str,
+        run_id: str,
+        owner_id: str,
+        lease_seconds: float,
+    ) -> bool:
+        return True
+
+    def release_run_lease(self, task_id: str, run_id: str, owner_id: str) -> bool:
+        return True
+
+    def is_run_lease_active(self, task_id: str, run_id: str) -> bool:
+        return False
+
+    def count_active_run_leases(self) -> int:
+        return 0

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listDatasets, previewDataset } from '../api/datasets'
 import { cancelTaskRun, disableTask, enableTask, getCrawlerDiagnostics, getTask, listTaskRunsPage, startTaskRun } from '../api/tasks'
@@ -14,7 +14,14 @@ import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useI18n } from '../composables/useI18n'
 import { requestConfirm } from '../lib/confirm'
 import { lastPageOffset } from '../lib/pagination'
-import type { CollectionTask, CrawlerDiagnostics, Dataset, DatasetPreview, TaskRun } from '../types'
+import type {
+  CollectionTask,
+  CrawlerDiagnostics,
+  Dataset,
+  DatasetPreview,
+  TaskRun,
+  TaskRunFailureDiagnosis,
+} from '../types'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,6 +47,7 @@ const error = ref('')
 let detailRequestId = 0
 let runsRequestId = 0
 let previewRequestId = 0
+let runPollTimer: number | undefined
 
 const summaryCards = computed(() => [
   { label: t('taskDetail.runCount'), value: runTotal.value },
@@ -51,6 +59,35 @@ const summaryCards = computed(() => [
 const runtimeJson = computed(() => JSON.stringify(task.value?.runtime_payload_json || {}, null, 2))
 const payloadJson = computed(() => JSON.stringify(task.value?.task_payload_json || {}, null, 2))
 const analysisJson = computed(() => JSON.stringify(task.value?.analysis_profile_json || {}, null, 2))
+
+function hasActiveRun() {
+  return runs.value.some((run) => ['pending', 'running'].includes(run.status))
+}
+
+function clearRunPolling() {
+  if (runPollTimer !== undefined) {
+    window.clearTimeout(runPollTimer)
+    runPollTimer = undefined
+  }
+}
+
+function scheduleRunPolling() {
+  clearRunPolling()
+  if (!hasActiveRun()) return
+  runPollTimer = window.setTimeout(() => {
+    void pollActiveRuns()
+  }, 2000)
+}
+
+async function pollActiveRuns() {
+  const wasActive = hasActiveRun()
+  await loadRuns()
+  if (wasActive && !hasActiveRun()) {
+    await loadDetail()
+    return
+  }
+  scheduleRunPolling()
+}
 
 async function loadDetail() {
   const requestedTaskId = taskId.value
@@ -78,6 +115,7 @@ async function loadDetail() {
         if (runTotal.value > 0) await loadRuns()
       }
     }
+    scheduleRunPolling()
   } catch (err) {
     if (requestId === detailRequestId && requestedTaskId === taskId.value) {
       error.value = err instanceof Error ? err.message : String(err)
@@ -123,7 +161,7 @@ async function runNow() {
     message.value =
       run.status === 'succeeded'
         ? t('tasks.runCompleted')
-        : t('tasks.runStatus', { status: labelValue(run.status) })
+        : t('tasks.runAccepted', { status: labelValue(run.status) })
     runOffset.value = 0
     await loadDetail()
   } catch (err) {
@@ -149,11 +187,12 @@ async function toggleStatus(nextStatus: 'enabled' | 'disabled') {
 }
 
 async function cancelRun(run: TaskRun) {
-  if (!task.value || run.status !== 'pending') return
+  if (!task.value || !['pending', 'running'].includes(run.status)) return
+  const isRunning = run.status === 'running'
   const confirmed = await requestConfirm({
-    title: t('taskDetail.cancelRunTitle'),
-    message: t('taskDetail.cancelRunMessage'),
-    confirmLabel: t('taskDetail.cancelRunConfirm'),
+    title: t(isRunning ? 'taskDetail.stopRunTitle' : 'taskDetail.cancelRunTitle'),
+    message: t(isRunning ? 'taskDetail.stopRunMessage' : 'taskDetail.cancelRunMessage'),
+    confirmLabel: t(isRunning ? 'taskDetail.stopRunConfirm' : 'taskDetail.cancelRunConfirm'),
     tone: 'warning',
   })
   if (!confirmed) return
@@ -163,8 +202,9 @@ async function cancelRun(run: TaskRun) {
   error.value = ''
   try {
     await cancelTaskRun(task.value.id, run.id)
-    message.value = t('taskDetail.runCancelled')
+    message.value = t(isRunning ? 'taskDetail.runStopped' : 'taskDetail.runCancelled')
     await loadRuns()
+    scheduleRunPolling()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -212,6 +252,55 @@ function statusTone(status: string) {
   return 'neutral'
 }
 
+function runProgress(run: TaskRun) {
+  const rawProgress = run.run_result_json.progress
+  if (rawProgress && typeof rawProgress === 'object') {
+    const progress = rawProgress as Record<string, unknown>
+    const percent = Number(progress.percent)
+    return {
+      stage: String(progress.stage || run.status),
+      percent: Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0,
+    }
+  }
+  if (['succeeded', 'failed', 'cancelled'].includes(run.status)) {
+    return { stage: run.status === 'succeeded' ? 'completed' : run.status, percent: 100 }
+  }
+  return { stage: run.status === 'running' ? 'collecting' : 'queued', percent: run.status === 'running' ? 25 : 0 }
+}
+
+function progressStageLabel(stage: string) {
+  const key = `taskDetail.progressStage.${stage}`
+  const translated = t(key)
+  return translated === key ? stage : translated
+}
+
+function failureDiagnosis(run: TaskRun): TaskRunFailureDiagnosis | null {
+  const rawDiagnosis = run.run_result_json.failure_diagnosis
+  if (!rawDiagnosis || typeof rawDiagnosis !== 'object') return null
+  const diagnosis = rawDiagnosis as Record<string, unknown>
+  if (typeof diagnosis.code !== 'string' || typeof diagnosis.retryable !== 'boolean') return null
+  return {
+    code: diagnosis.code,
+    retryable: diagnosis.retryable,
+    suggestions: Array.isArray(diagnosis.suggestions)
+      ? diagnosis.suggestions.filter((item): item is string => typeof item === 'string')
+      : [],
+    return_code: typeof diagnosis.return_code === 'number' ? diagnosis.return_code : null,
+  }
+}
+
+function failureCodeLabel(code: string) {
+  const key = `taskDetail.failureCode.${code}`
+  const translated = t(key)
+  return translated === key ? code : translated
+}
+
+function failureSuggestionLabel(suggestion: string) {
+  const key = `taskDetail.failureSuggestion.${suggestion}`
+  const translated = t(key)
+  return translated === key ? suggestion : translated
+}
+
 function labelValue(value: string) {
   const key = `enum.${value}`
   const translated = t(key)
@@ -221,6 +310,7 @@ function labelValue(value: string) {
 watch(
   taskId,
   () => {
+    clearRunPolling()
     runsRequestId += 1
     previewRequestId += 1
     task.value = null
@@ -237,6 +327,8 @@ watch(
   },
   { immediate: true },
 )
+
+onUnmounted(clearRunPolling)
 </script>
 
 <template>
@@ -327,26 +419,70 @@ watch(
               <div class="item-main">
                 <div>
                   <strong>{{ run.id }}</strong>
-                  <p>{{ run.trigger_type }} · {{ run.started_at || '-' }}</p>
+                  <p>
+                    {{ run.trigger_type }} · {{ run.started_at || '-' }} ·
+                    {{ t('taskDetail.queuePriority') }}:
+                    {{ labelValue(String(run.run_result_json.queue_priority || 'normal')) }}
+                  </p>
                 </div>
                 <div class="run-actions">
                   <StatusBadge :label="labelValue(run.status)" :tone="statusTone(run.status)" />
-                  <PermissionGate v-if="run.status === 'pending'" area="operations" compact>
+                  <PermissionGate v-if="['pending', 'running'].includes(run.status)" area="operations" compact>
                     <button
                       class="secondary-button"
                       :disabled="cancellingRunIds.includes(run.id)"
                       type="button"
                       @click="cancelRun(run)"
                     >
-                      {{ cancellingRunIds.includes(run.id) ? t('taskDetail.cancellingRun') : t('taskDetail.cancelRun') }}
+                      {{
+                        cancellingRunIds.includes(run.id)
+                          ? t(run.status === 'running' ? 'taskDetail.stoppingRun' : 'taskDetail.cancellingRun')
+                          : t(run.status === 'running' ? 'taskDetail.stopRun' : 'taskDetail.cancelRun')
+                      }}
                     </button>
                   </PermissionGate>
                 </div>
+              </div>
+              <div class="run-progress">
+                <div class="run-progress-head">
+                  <span>
+                    {{ t('taskDetail.progress') }} ·
+                    {{ progressStageLabel(runProgress(run).stage) }}
+                  </span>
+                  <strong>{{ runProgress(run).percent }}%</strong>
+                </div>
+                <progress
+                  :aria-label="t('taskDetail.progressAria', { percent: runProgress(run).percent })"
+                  :value="runProgress(run).percent"
+                  max="100"
+                />
               </div>
               <div class="item-meta">
                 <span>{{ t('taskDetail.finishedAt') }}: {{ run.finished_at || '-' }}</span>
                 <span>{{ t('taskDetail.datasets') }}: {{ run.result_dataset_ids.join(', ') || '-' }}</span>
                 <span v-if="run.error_message" class="error-text">{{ run.error_message }}</span>
+              </div>
+              <div v-if="failureDiagnosis(run)" class="failure-diagnosis">
+                <div class="failure-diagnosis-head">
+                  <div>
+                    <strong>{{ t('taskDetail.failureDiagnosis') }}</strong>
+                    <span>
+                      {{ failureCodeLabel(failureDiagnosis(run)!.code) }}
+                      <template v-if="failureDiagnosis(run)!.return_code !== null">
+                        · {{ t('taskDetail.returnCode', { code: failureDiagnosis(run)!.return_code ?? '-' }) }}
+                      </template>
+                    </span>
+                  </div>
+                  <StatusBadge
+                    :label="t(failureDiagnosis(run)!.retryable ? 'taskDetail.retryable' : 'taskDetail.notRetryable')"
+                    :tone="failureDiagnosis(run)!.retryable ? 'warning' : 'danger'"
+                  />
+                </div>
+                <ul v-if="failureDiagnosis(run)!.suggestions.length">
+                  <li v-for="suggestion in failureDiagnosis(run)!.suggestions" :key="suggestion">
+                    {{ failureSuggestionLabel(suggestion) }}
+                  </li>
+                </ul>
               </div>
             </article>
             <EmptyState v-if="!runs.length" :title="t('taskDetail.noRunsTitle')" :description="t('taskDetail.noRunsDescription')" />
@@ -500,6 +636,80 @@ watch(
   display: grid;
   gap: 5px;
   margin-top: 10px;
+  font-size: 13px;
+}
+
+.run-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.run-progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.run-progress-head strong {
+  color: #0f172a;
+}
+
+.run-progress progress {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 4px;
+  background: #e2e8f0;
+}
+
+.run-progress progress::-webkit-progress-bar {
+  background: #e2e8f0;
+}
+
+.run-progress progress::-webkit-progress-value {
+  background: #0f766e;
+}
+
+.run-progress progress::-moz-progress-bar {
+  background: #0f766e;
+}
+
+.failure-diagnosis {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid #d97706;
+}
+
+.failure-diagnosis-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.failure-diagnosis-head strong,
+.failure-diagnosis-head span {
+  display: block;
+}
+
+.failure-diagnosis-head span {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.failure-diagnosis ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
   font-size: 13px;
 }
 
