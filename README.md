@@ -66,7 +66,7 @@ Start the frontend in another terminal:
 npm --prefix frontend run dev
 ```
 
-The frontend is available at http://127.0.0.1:5173 and proxies API requests to http://127.0.0.1:8180.
+The frontend is available at http://127.0.0.1:5200 and proxies API requests to http://127.0.0.1:8180.
 
 On Linux or macOS, use `.venv/bin/python` instead of `.venv\Scripts\python.exe` and `cp .env.example .env` instead of `Copy-Item`.
 
@@ -74,10 +74,11 @@ On Linux or macOS, use `.venv/bin/python` instead of `.venv\Scripts\python.exe` 
 
 ```powershell
 .venv\Scripts\python.exe -m pytest backend\tests
+npm --prefix frontend run check:i18n
 npm --prefix frontend run build
 ```
 
-GitHub Actions runs the same backend test suite and frontend production build on `main`.
+GitHub Actions runs the same backend test suite, i18n dictionary check, and frontend production build on `main`.
 
 ## Repository Layout
 

@@ -1,0 +1,16 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.crawler
+      additional_contexts:
+        mediacrawler: ${MEDIASPIDER_MEDIA_CRAWLER_HOST_PATH:-./vendor/MediaCrawler}
+    environment:
+      MEDIASPIDER_MEDIA_CRAWLER_ROOT: /opt/mediacrawler
+      MEDIASPIDER_MEDIA_CRAWLER_COMMAND: python /app/backend/scripts/run_mediacrawler.py
+    volumes:
+      - mediaspider-browser-data:/opt/mediacrawler/browser_data
+    shm_size: "1gb"
+
+volumes:
+  mediaspider-browser-data:

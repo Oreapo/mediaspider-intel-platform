@@ -96,10 +96,24 @@ backend:8000/api/*
 MediaCrawler 工作目录：
 
 ```text
-MEDIASPIDER_MEDIA_CRAWLER_ROOT=/absolute/path/to/MediaCrawler
+MEDIASPIDER_MEDIA_CRAWLER_HOST_PATH=/absolute/path/to/MediaCrawler
 ```
 
-Docker Compose 默认不挂载外部 crawler 代码，避免下载仓库后引用不存在的容器路径。
+使用 crawler 覆盖文件构建并启动：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.crawler.yml up --build -d
+```
+
+该镜像只安装 MediaCrawler 核心依赖、Chromium 和中文字体，不包含 PySide6 GUI。构建时会把
+指定的 MediaCrawler 目录作为 BuildKit additional context 复制到 `/opt/mediacrawler`，运行时
+后端通过内置的 `run_mediacrawler.py` 兼容启动器执行采集。浏览器状态保存在独立的
+`mediaspider-browser-data` volume，采集输出和任务数据库仍保存在 `mediaspider-storage`。
+
+Linux 无桌面服务器应创建 Cookie Profile，并把任务设置为 `headless=true`。二维码或手机号
+登录需要可见浏览器，诊断接口会阻止它们与无头模式组合使用。
+
+基础命令 `docker compose up --build` 仍只构建轻量 Web 平台，不包含真实采集环境。
 
 ## 7. 认证配置
 

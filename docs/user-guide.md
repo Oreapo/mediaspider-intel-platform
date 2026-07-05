@@ -56,7 +56,7 @@ npm run dev
 默认前端地址：
 
 ```text
-http://127.0.0.1:5173
+http://127.0.0.1:5200
 ```
 
 ## 2. 首页看板
@@ -119,6 +119,7 @@ http://127.0.0.1:5173
 “启动采集运行”会立即返回已提交的运行记录，不会等待采集器结束。任务详情页会在运行处于
 `pending` 或 `running` 时自动刷新，并展示排队、采集和结果入库进度；完成、失败或取消后停止轮询并同步关联数据集。
 失败运行还会显示错误分类、是否建议直接重试，以及检查登录态、采集配置、网络、代理、存储或运行日志等处理建议。
+对于标记为“建议重试”的失败，可在运行记录中直接重新提交；新运行会保留来源运行 ID 和重试次数，方便追踪完整链路。
 
 ## 4. 数据集
 
@@ -389,8 +390,20 @@ http://127.0.0.1:5173
 平台登入 Profile 字段说明：
 
 - 平台：Profile 适用的平台，例如小红书、抖音、闲鱼。
-- 认证类型：`cookie` 适合自动化采集；`state_file` 用于引用浏览器状态文件；`qrcode` 和 `phone` 当前主要作为配置占位。
-- credentials_ref：Cookie 文本或 state_file 路径，页面会脱敏显示。
+- 认证类型：`cookie` 适合自动化采集；`qrcode` 和 `phone` 需要交互登录。旧版 `state_file` Profile 会保留，但 MediaCrawler CLI 不支持传入任意状态文件，因此不能用于新任务。
+- credentials_ref：Cookie 文本，页面会脱敏显示。
+
+### MediaCrawler Web 运行环境
+
+当前 Web 后端只需要 MediaCrawler 核心运行时，不需要安装原桌面项目的 PySide6 GUI 依赖。为 MediaCrawler 源码目录创建独立虚拟环境后，使用本项目的精简依赖清单安装：
+
+```powershell
+python -m venv <MediaCrawler>\.venv
+<MediaCrawler>\.venv\Scripts\python.exe -m pip install -r backend\requirements-mediacrawler.txt
+<MediaCrawler>\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+任务诊断会优先使用 `<MediaCrawler>\.venv`，不存在时才尝试系统 `uv`。
 - 运行设置 JSON：会在任务运行时注入 `runtime_payload_json`，常用字段包括 `headless`、`max_concurrency_num`、`timeout_seconds`、`queue_priority`。队列优先级支持 `critical`、`high`、`normal`、`low`，同优先级按进入队列的先后顺序执行。
 
 Profile 使用流程：
