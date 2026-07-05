@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { parseList as toStringList } from '../lib/list'
 import {
   createTask,
   disableTask,
@@ -11,6 +12,7 @@ import {
   startTaskRun,
 } from '../api/tasks'
 import AppAlert from '../components/ui/AppAlert.vue'
+import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -19,13 +21,20 @@ import PaginationBar from '../components/ui/PaginationBar.vue'
 import PermissionGate from '../components/ui/PermissionGate.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue, scenarioLabel } from '../composables/useEnumLabel'
 import { usePlatformModels } from '../composables/usePlatformModels'
+import { usePlatformProfiles } from '../composables/usePlatformProfiles'
 import { useTasks } from '../composables/useTasks'
 import { lastPageOffset } from '../lib/pagination'
 import { nonNegativeNumber, required, type ValidationErrors } from '../lib/validation'
-import type { CrawlerDiagnostics, PlatformTaskModel, SchedulerStatus, TaskRun } from '../types'
+import type { CrawlerDiagnostics, PlatformProfile, PlatformTaskModel, SchedulerStatus, TaskRun } from '../types'
 
 const { items: platformItems } = usePlatformModels()
+const {
+  profiles: platformProfiles,
+  isLoading: profilesLoading,
+  error: profilesError,
+} = usePlatformProfiles()
 const { t } = useI18n()
 const {
   items: taskItems,
@@ -45,10 +54,16 @@ const form = ref({
   notes: '',
   start_page: 1,
   queue_priority: 'normal',
+  auth_profile_id: '',
+  login_type: 'qrcode',
+  save_option: 'jsonl',
   enable_comments: true,
   enable_sub_comments: false,
   headless: false,
-  analysis_types: 'summary,keywords',
+  max_comments_count_singlenotes: 10,
+  max_concurrency_num: 1,
+  signal_extractors: 'risk_terms,contact_points',
+  analysis_types: 'signal_summary',
 })
 const filters = ref({
   q: '',
@@ -87,6 +102,14 @@ const scenarioOptions = computed(() => [
 const selectedModel = computed<PlatformTaskModel | undefined>(() =>
   platformItems.value.find((item) => item.platform === form.value.platform),
 )
+const availableProfiles = computed(() =>
+  platformProfiles.value.filter(
+    (profile) => profile.platform === form.value.platform && profile.auth_type !== 'state_file',
+  ),
+)
+const selectedProfile = computed<PlatformProfile | undefined>(() =>
+  availableProfiles.value.find((profile) => profile.id === form.value.auth_profile_id),
+)
 
 const visibleFieldHints = computed(() => {
   const model = selectedModel.value
@@ -117,6 +140,21 @@ watch(
 )
 
 watch(
+  () => form.value.platform,
+  () => {
+    if (!availableProfiles.value.some((profile) => profile.id === form.value.auth_profile_id)) {
+      form.value.auth_profile_id = ''
+    }
+  },
+)
+
+watch(selectedProfile, (profile) => {
+  if (profile && ['qrcode', 'phone', 'cookie'].includes(profile.auth_type)) {
+    form.value.login_type = profile.auth_type
+  }
+})
+
+watch(
   taskItems,
   async (items) => {
     const entries = await Promise.all(
@@ -145,13 +183,6 @@ const inputPlaceholder = computed(() => {
   return t('tasks.keywordPlaceholder')
 })
 
-function toStringList(text: string) {
-  return text
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
 function validateTaskForm() {
   const errors: ValidationErrors = {}
   const nameError = required(form.value.task_name, t('tasks.taskName'))
@@ -161,6 +192,9 @@ function validateTaskForm() {
   if (nameError) errors.task_name = nameError
   if (inputError) errors.primary_input = inputError
   if (startPageError) errors.start_page = t('tasks.startPageInvalid')
+  if (!toStringList(form.value.signal_extractors).length) {
+    errors.signal_extractors = t('tasks.signalExtractorsRequired')
+  }
   if (!toStringList(form.value.analysis_types).length) errors.analysis_types = t('tasks.analysisTypesRequired')
 
   formErrors.value = errors
@@ -189,15 +223,23 @@ async function submitTask() {
       entity_type: form.value.entity_type,
       task_mode: form.value.task_mode,
       scenario_type: form.value.scenario_type,
+      auth_profile_id: form.value.auth_profile_id || null,
       task_payload_json: taskPayload,
       runtime_payload_json: {
         start_page: form.value.start_page,
         queue_priority: form.value.queue_priority,
+        login_type: form.value.login_type,
         enable_comments: form.value.enable_comments,
         enable_sub_comments: form.value.enable_sub_comments,
         headless: form.value.headless,
+        max_comments_count_singlenotes: form.value.max_comments_count_singlenotes,
+        max_concurrency_num: form.value.max_concurrency_num,
+      },
+      storage_profile_json: {
+        save_option: form.value.save_option,
       },
       analysis_profile_json: {
+        signal_extractors: toStringList(form.value.signal_extractors),
         analysis_types: toStringList(form.value.analysis_types),
       },
       notes: form.value.notes,
@@ -386,18 +428,6 @@ function runLeaseDetail(status: SchedulerStatus) {
   })
 }
 
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
-function scenarioLabel(value: string) {
-  const key = `scenario.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
 onMounted(loadSchedulerStatus)
 </script>
 
@@ -417,11 +447,14 @@ onMounted(loadSchedulerStatus)
         <div class="grid-two">
           <label class="field">
             <span>{{ t('tasks.platform') }}</span>
-            <select v-model="form.platform">
-              <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                {{ item.label }}
-              </option>
-            </select>
+            <div class="select-with-icon">
+              <PlatformLogo :platform="form.platform" :size="18" class="select-icon" />
+              <select v-model="form.platform">
+                <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
+                  {{ labelValue(item.platform) }}
+                </option>
+              </select>
+            </div>
           </label>
 
           <label class="field">
@@ -477,6 +510,52 @@ onMounted(loadSchedulerStatus)
           </label>
         </div>
 
+        <div class="grid-two">
+          <label class="field">
+            <span>{{ t('tasks.authProfile') }}</span>
+            <select v-model="form.auth_profile_id" :disabled="profilesLoading">
+              <option value="">{{ t('tasks.authProfileNone') }}</option>
+              <option v-for="profile in availableProfiles" :key="profile.id" :value="profile.id">
+                {{ profile.profile_name }} · {{ labelValue(profile.auth_type) }}
+              </option>
+            </select>
+            <small v-if="!profilesLoading && !profilesError && !availableProfiles.length">
+              {{ t('tasks.authProfileEmpty') }}
+            </small>
+            <FieldError :message="profilesError" />
+          </label>
+
+          <label class="field">
+            <span>{{ t('tasks.loginType') }}</span>
+            <select v-model="form.login_type">
+              <option value="qrcode">{{ t('tasks.loginTypeQrcode') }}</option>
+              <option value="phone">{{ t('tasks.loginTypePhone') }}</option>
+              <option value="cookie">{{ t('tasks.loginTypeCookie') }}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>{{ t('tasks.saveOption') }}</span>
+            <select v-model="form.save_option">
+              <option value="jsonl">JSONL</option>
+              <option value="json">JSON</option>
+              <option value="csv">CSV</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="grid-two">
+          <label class="field">
+            <span>{{ t('tasks.maxCommentsCount') }}</span>
+            <input v-model.number="form.max_comments_count_singlenotes" min="0" step="1" type="number" />
+          </label>
+
+          <label class="field">
+            <span>{{ t('tasks.maxConcurrency') }}</span>
+            <input v-model.number="form.max_concurrency_num" min="1" step="1" type="number" />
+          </label>
+        </div>
+
         <label class="field">
           <span>{{ inputLabel }}</span>
           <textarea v-model="form.primary_input" :placeholder="inputPlaceholder" required rows="5" />
@@ -484,8 +563,20 @@ onMounted(loadSchedulerStatus)
         </label>
 
         <label class="field">
+          <span>{{ t('tasks.signalExtractors') }}</span>
+          <input
+            v-model="form.signal_extractors"
+            :placeholder="selectedModel?.supported_signal_extractors.join(',') || 'risk_terms,contact_points'"
+          />
+          <FieldError :message="formErrors.signal_extractors" />
+        </label>
+
+        <label class="field">
           <span>{{ t('tasks.analysisTypes') }}</span>
-          <input v-model="form.analysis_types" placeholder="risk_terms,contact_points,template_similarity" />
+          <input
+            v-model="form.analysis_types"
+            :placeholder="selectedModel?.supported_analysis_types.join(',') || 'signal_summary'"
+          />
           <FieldError :message="formErrors.analysis_types" />
         </label>
 
@@ -626,12 +717,15 @@ onMounted(loadSchedulerStatus)
 
         <label class="field">
           <span>{{ t('tasks.platform') }}</span>
-          <select v-model="filters.platform">
-            <option value="">{{ t('tasks.allPlatforms') }}</option>
-            <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-              {{ item.label }}
-            </option>
-          </select>
+          <div class="select-with-icon">
+            <PlatformLogo v-if="filters.platform" :platform="filters.platform" :size="18" class="select-icon" />
+            <select v-model="filters.platform" :class="{ 'no-icon': !filters.platform }">
+              <option value="">{{ t('tasks.allPlatforms') }}</option>
+              <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
+                {{ labelValue(item.platform) }}
+              </option>
+            </select>
+          </div>
         </label>
 
         <label class="field">
@@ -691,7 +785,10 @@ onMounted(loadSchedulerStatus)
           <div class="task-main">
             <div>
                 <strong>{{ item.task_name }}</strong>
-          <p>{{ item.platform }} · {{ scenarioLabel(item.scenario_type) }} · {{ item.entity_type }} · {{ item.task_mode }}</p>
+          <p class="platform-line">
+            <PlatformLogo :platform="item.platform" :size="16" />
+            {{ labelValue(item.platform) }} · {{ scenarioLabel(item.scenario_type) }} · {{ labelValue(item.entity_type) }} · {{ item.task_mode }}
+          </p>
             </div>
             <StatusBadge :label="labelValue(item.status)" :tone="statusTone(item.status)" />
           </div>
@@ -876,6 +973,33 @@ onMounted(loadSchedulerStatus)
 
 .field textarea {
   resize: vertical;
+}
+
+.select-with-icon {
+  position: relative;
+}
+
+.select-with-icon .select-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #0f766e;
+  pointer-events: none;
+}
+
+.select-with-icon select {
+  padding-left: 38px;
+}
+
+.select-with-icon select.no-icon {
+  padding-left: 14px;
+}
+
+.platform-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .toggle-row {

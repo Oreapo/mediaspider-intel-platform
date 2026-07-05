@@ -8,6 +8,7 @@ import LoadingState from '../components/ui/LoadingState.vue'
 import PaginationBar from '../components/ui/PaginationBar.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue } from '../composables/useEnumLabel'
 import type { AuditEvent, RunLogDetail, RunLogEntry } from '../types'
 
 const { t } = useI18n()
@@ -134,12 +135,6 @@ function actionLabel(action: string) {
   return translated === key ? action : translated
 }
 
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
 onMounted(() => {
   fetchEntries()
   fetchAuditEvents()
@@ -176,82 +171,96 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="tab-strip" role="tablist" :aria-label="t('logs.tabAria')">
-        <button :class="{ active: activeTab === 'runs' }" type="button" @click="activeTab = 'runs'">{{ t('logs.runTab') }}</button>
-        <button :class="{ active: activeTab === 'audit' }" type="button" @click="activeTab = 'audit'">{{ t('logs.auditTab') }}</button>
-      </div>
     </BaseSection>
 
-    <section v-if="activeTab === 'runs'" class="content-grid">
-      <BaseSection :title="t('logs.runHistoryTitle')" :description="t('logs.runHistoryDescription')">
-        <LoadingState v-if="isLoading" :title="t('logs.loadingLogs')" />
-        <AppAlert v-else-if="error" tone="error" :title="t('common.loadFailed')" :message="error" />
-        <div v-else class="run-list">
-          <button
-            v-for="entry in entries"
-            :key="entry.run.id"
-            class="run-item"
-            type="button"
-            @click="selectRun(entry)"
-          >
-            <StatusBadge :label="labelValue(entry.run.status)" :tone="runTone(entry.run.status)" />
-            <strong>{{ entry.run.task_id }}</strong>
-            <span>{{ formatDate(entry.run.started_at) }}</span>
-            <span>{{ entry.has_log ? formatBytes(entry.log_size) : t('logs.noLog') }}</span>
+    <div class="logs-workspace">
+      <aside class="logs-side-panel">
+        <BaseSection compact :title="t('logs.tabAria')" :description="activeTab === 'runs' ? t('logs.runHistoryDescription') : t('logs.auditDescription')">
+          <div class="tab-strip" role="tablist" :aria-label="t('logs.tabAria')">
+            <button :class="{ active: activeTab === 'runs' }" type="button" @click="activeTab = 'runs'">{{ t('logs.runTab') }}</button>
+            <button :class="{ active: activeTab === 'audit' }" type="button" @click="activeTab = 'audit'">{{ t('logs.auditTab') }}</button>
+          </div>
+          <button class="secondary-button refresh-button" type="button" @click="activeTab === 'runs' ? fetchEntries() : fetchAuditEvents()">
+            {{ t('logs.refresh') }}
           </button>
-          <EmptyState v-if="!entries.length" :title="t('logs.noRunsTitle')" :description="t('logs.noRunsDescription')" />
-        </div>
-      </BaseSection>
+        </BaseSection>
 
-      <BaseSection
-        class="log-card"
-        :title="t('logs.outputTitle')"
-        :description="selected ? `${selected.run.id} · ${selected.line_count} lines` : t('logs.outputDescription')"
-      >
-        <LoadingState v-if="isLoadingLog" :title="t('logs.loadingLogs')" />
-        <AppAlert v-else-if="logError" tone="warning" :title="t('logs.unreadableTitle')" :message="logError" />
-        <pre v-else-if="selected" class="log-output">{{ selected.content }}</pre>
-        <EmptyState v-else :title="t('logs.noSelectionTitle')" :description="t('logs.noSelectionDescription')" />
-      </BaseSection>
-    </section>
+        <BaseSection v-if="activeTab === 'runs'" compact :title="t('logs.runHistoryTitle')" :description="t('logs.runHistoryDescription')">
+          <LoadingState v-if="isLoading" :title="t('logs.loadingLogs')" />
+          <AppAlert v-else-if="error" tone="error" :title="t('common.loadFailed')" :message="error" />
+          <div v-else class="run-list">
+            <button
+              v-for="entry in entries"
+              :key="entry.run.id"
+              class="run-item"
+              type="button"
+              @click="selectRun(entry)"
+            >
+              <StatusBadge :label="labelValue(entry.run.status)" :tone="runTone(entry.run.status)" />
+              <strong>{{ entry.run.task_id }}</strong>
+              <span>{{ formatDate(entry.run.started_at) }}</span>
+              <span>{{ entry.has_log ? formatBytes(entry.log_size) : t('logs.noLog') }}</span>
+            </button>
+            <EmptyState v-if="!entries.length" :title="t('logs.noRunsTitle')" :description="t('logs.noRunsDescription')" />
+          </div>
+        </BaseSection>
 
-    <BaseSection v-else :title="t('logs.auditTitle')" :description="t('logs.auditDescription')">
-      <form class="audit-filter" @submit.prevent="applyAuditFilters">
-        <input v-model="auditFilters.q" :placeholder="t('logs.auditSearchPlaceholder')" />
-        <input v-model="auditFilters.targetType" :placeholder="t('logs.targetTypePlaceholder')" />
-        <input v-model="auditFilters.targetId" :placeholder="t('logs.targetIdPlaceholder')" />
-        <input v-model="auditFilters.actorUsername" :placeholder="t('logs.actorPlaceholder')" />
-        <input v-model="auditFilters.action" :placeholder="t('logs.actionPlaceholder')" />
-        <input v-model="auditFilters.createdFrom" type="datetime-local" />
-        <input v-model="auditFilters.createdTo" type="datetime-local" />
-        <button class="secondary-button" type="submit">{{ t('logs.filter') }}</button>
-        <button class="secondary-button" type="button" @click="clearAuditFilters">{{ t('tasks.clear') }}</button>
-      </form>
-      <LoadingState v-if="isLoadingAudit" :title="t('logs.loadingAudit')" />
-      <AppAlert v-else-if="auditError" tone="error" :title="t('common.loadFailed')" :message="auditError" />
-      <div v-else class="audit-list">
-        <article v-for="event in auditEvents" :key="event.id" class="audit-item">
-          <div>
-            <StatusBadge :label="actionLabel(event.action)" tone="info" />
-            <h3>{{ event.summary }}</h3>
-            <p>{{ event.target_type }} / {{ event.target_id }}</p>
+        <BaseSection v-else compact :title="t('logs.auditTitle')" :description="t('logs.auditDescription')">
+          <form class="audit-filter" @submit.prevent="applyAuditFilters">
+            <input v-model="auditFilters.q" :placeholder="t('logs.auditSearchPlaceholder')" />
+            <input v-model="auditFilters.targetType" :placeholder="t('logs.targetTypePlaceholder')" />
+            <input v-model="auditFilters.targetId" :placeholder="t('logs.targetIdPlaceholder')" />
+            <input v-model="auditFilters.actorUsername" :placeholder="t('logs.actorPlaceholder')" />
+            <input v-model="auditFilters.action" :placeholder="t('logs.actionPlaceholder')" />
+            <input v-model="auditFilters.createdFrom" type="datetime-local" />
+            <input v-model="auditFilters.createdTo" type="datetime-local" />
+            <button class="secondary-button" type="submit">{{ t('logs.filter') }}</button>
+            <button class="secondary-button" type="button" @click="clearAuditFilters">{{ t('tasks.clear') }}</button>
+          </form>
+        </BaseSection>
+      </aside>
+
+      <main class="logs-main-panel">
+        <BaseSection
+          v-if="activeTab === 'runs'"
+          class="log-card"
+          :title="t('logs.outputTitle')"
+          :description="selected ? `${selected.run.id} · ${selected.line_count} lines` : t('logs.outputDescription')"
+        >
+          <LoadingState v-if="isLoadingLog" :title="t('logs.loadingLogs')" />
+          <AppAlert v-else-if="logError" tone="warning" :title="t('logs.unreadableTitle')" :message="logError" />
+          <pre v-else-if="selected" class="log-output">{{ selected.content }}</pre>
+          <EmptyState v-else :title="t('logs.noSelectionTitle')" :description="t('logs.noSelectionDescription')" />
+        </BaseSection>
+
+        <BaseSection v-else :title="t('logs.auditTitle')" :description="t('logs.auditDescription')">
+          <LoadingState v-if="isLoadingAudit" :title="t('logs.loadingAudit')" />
+          <AppAlert v-else-if="auditError" tone="error" :title="t('common.loadFailed')" :message="auditError" />
+          <div v-else class="audit-list">
+            <article v-for="event in auditEvents" :key="event.id" class="audit-item">
+              <div>
+                <StatusBadge :label="actionLabel(event.action)" tone="info" />
+                <h3>{{ event.summary }}</h3>
+                <p>{{ event.target_type }} / {{ event.target_id }}</p>
+              </div>
+              <div class="audit-meta">
+                <strong>{{ event.actor_username }}</strong>
+                <span>{{ event.actor_role }}</span>
+                <time>{{ formatDate(event.created_at) }}</time>
+              </div>
+            </article>
+            <EmptyState v-if="!auditEvents.length" :title="t('logs.noAuditTitle')" :description="t('logs.noAuditDescription')" />
+            <PaginationBar
+              :total="auditTotal"
+              :limit="auditLimit"
+              :offset="auditOffset"
+              :loading="isLoadingAudit"
+              @change="moveAuditPage"
+            />
           </div>
-          <div class="audit-meta">
-            <strong>{{ event.actor_username }}</strong>
-            <span>{{ event.actor_role }}</span>
-            <time>{{ formatDate(event.created_at) }}</time>
-          </div>
-        </article>
-        <EmptyState v-if="!auditEvents.length" :title="t('logs.noAuditTitle')" :description="t('logs.noAuditDescription')" />
-        <PaginationBar
-          :total="auditTotal"
-          :limit="auditLimit"
-          :offset="auditOffset"
-          :loading="isLoadingAudit"
-          @change="moveAuditPage"
-        />
-      </div>
-    </BaseSection>
+        </BaseSection>
+      </main>
+    </div>
   </section>
 </template>
 
@@ -297,6 +306,35 @@ onMounted(() => {
   gap: 12px;
 }
 
+.logs-workspace {
+  display: grid;
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.logs-side-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 104px);
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.logs-main-panel {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.logs-side-panel .secondary-button {
+  width: 100%;
+}
+
 .stat-item {
   display: grid;
   gap: 6px;
@@ -311,10 +349,9 @@ onMounted(() => {
 }
 
 .tab-strip {
-  display: inline-grid;
+  display: grid;
   grid-template-columns: repeat(2, minmax(120px, 1fr));
   gap: 4px;
-  margin-top: 16px;
   padding: 4px;
   border: 1px solid rgba(203, 213, 225, 0.86);
   border-radius: 12px;
@@ -337,18 +374,15 @@ onMounted(() => {
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
 }
 
-.content-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.4fr);
-  gap: 16px;
+.refresh-button {
+  margin-top: 12px;
 }
 
 .audit-filter {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(120px, 1fr)) minmax(160px, 1fr) minmax(160px, 1fr) auto auto;
+  grid-template-columns: 1fr;
   gap: 10px;
-  align-items: center;
-  margin-bottom: 16px;
+  align-items: stretch;
 }
 
 .audit-filter input {
@@ -374,6 +408,12 @@ onMounted(() => {
 
 .run-item strong {
   overflow-wrap: anywhere;
+}
+
+.logs-side-panel .run-list {
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .audit-item {
@@ -431,8 +471,8 @@ onMounted(() => {
 }
 
 .log-output {
-  min-height: 420px;
-  max-height: 640px;
+  min-height: 620px;
+  max-height: calc(100vh - 250px);
   margin: 0;
   padding: 16px;
   overflow: auto;
@@ -451,9 +491,22 @@ onMounted(() => {
 
 @media (max-width: 960px) {
   .stats-grid,
-  .content-grid,
+  .logs-workspace,
   .audit-filter {
     grid-template-columns: 1fr;
+  }
+
+  .logs-side-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .logs-side-panel .run-list {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .section-head {

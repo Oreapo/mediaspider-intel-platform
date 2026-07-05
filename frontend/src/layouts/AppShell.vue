@@ -198,7 +198,7 @@ const pageMeta = computed(() => {
 }
 
 .main-inner {
-  width: min(100%, 1760px);
+  width: 100%;
   margin: 0;
   display: grid;
   gap: 16px;

@@ -23,6 +23,7 @@ import { useCases } from '../composables/useCases'
 import { useDatasets } from '../composables/useDatasets'
 import { useEntities } from '../composables/useEntities'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue, scenarioLabel } from '../composables/useEnumLabel'
 import { useSignals } from '../composables/useSignals'
 import { getAnalysisOutputsBatch } from '../api/analysis'
 import { downloadEvidencePacket, generateEvidencePacket } from '../api/evidence'
@@ -494,18 +495,6 @@ function timelineEventLabel(eventType: string) {
   const key = `cases.timelineEvent.${eventType}`
   const translated = t(key)
   return translated === key ? eventType : translated
-}
-
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
-function scenarioLabel(value: string) {
-  const key = `scenario.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
 }
 
 function formatDate(value: string | null) {

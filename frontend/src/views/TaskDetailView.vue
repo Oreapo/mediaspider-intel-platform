@@ -2,7 +2,16 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listDatasets, previewDataset } from '../api/datasets'
-import { cancelTaskRun, disableTask, enableTask, getCrawlerDiagnostics, getTask, listTaskRunsPage, startTaskRun } from '../api/tasks'
+import {
+  cancelTaskRun,
+  disableTask,
+  enableTask,
+  getCrawlerDiagnostics,
+  getTask,
+  listTaskRunsPage,
+  retryTaskRun,
+  startTaskRun,
+} from '../api/tasks'
 import AppAlert from '../components/ui/AppAlert.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -12,6 +21,7 @@ import PermissionGate from '../components/ui/PermissionGate.vue'
 import RetryState from '../components/ui/RetryState.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue } from '../composables/useEnumLabel'
 import { requestConfirm } from '../lib/confirm'
 import { lastPageOffset } from '../lib/pagination'
 import type {
@@ -42,6 +52,7 @@ const isLoading = ref(false)
 const runsLoading = ref(false)
 const busy = ref(false)
 const cancellingRunIds = ref<string[]>([])
+const retryingRunIds = ref<string[]>([])
 const message = ref('')
 const error = ref('')
 let detailRequestId = 0
@@ -212,6 +223,26 @@ async function cancelRun(run: TaskRun) {
   }
 }
 
+async function retryRun(run: TaskRun) {
+  if (!task.value || !failureDiagnosis(run)?.retryable) return
+  retryingRunIds.value = [...retryingRunIds.value, run.id]
+  message.value = ''
+  error.value = ''
+  try {
+    const retriedRun = await retryTaskRun(task.value.id, run.id)
+    message.value = t('taskDetail.retryAccepted', {
+      runId: retriedRun.id,
+      attempt: retryAttempt(retriedRun),
+    })
+    runOffset.value = 0
+    await loadDetail()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    retryingRunIds.value = retryingRunIds.value.filter((id) => id !== run.id)
+  }
+}
+
 async function diagnose() {
   if (!task.value) return
   busy.value = true
@@ -301,10 +332,9 @@ function failureSuggestionLabel(suggestion: string) {
   return translated === key ? suggestion : translated
 }
 
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
+function retryAttempt(run: TaskRun) {
+  const parsed = Number(run.run_result_json.retry_attempt)
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0
 }
 
 watch(
@@ -460,6 +490,14 @@ onUnmounted(clearRunPolling)
               <div class="item-meta">
                 <span>{{ t('taskDetail.finishedAt') }}: {{ run.finished_at || '-' }}</span>
                 <span>{{ t('taskDetail.datasets') }}: {{ run.result_dataset_ids.join(', ') || '-' }}</span>
+                <span v-if="run.run_result_json.retry_of_run_id">
+                  {{
+                    t('taskDetail.retrySource', {
+                      runId: String(run.run_result_json.retry_of_run_id),
+                      attempt: retryAttempt(run),
+                    })
+                  }}
+                </span>
                 <span v-if="run.error_message" class="error-text">{{ run.error_message }}</span>
               </div>
               <div v-if="failureDiagnosis(run)" class="failure-diagnosis">
@@ -473,10 +511,26 @@ onUnmounted(clearRunPolling)
                       </template>
                     </span>
                   </div>
-                  <StatusBadge
-                    :label="t(failureDiagnosis(run)!.retryable ? 'taskDetail.retryable' : 'taskDetail.notRetryable')"
-                    :tone="failureDiagnosis(run)!.retryable ? 'warning' : 'danger'"
-                  />
+                  <div class="failure-diagnosis-actions">
+                    <StatusBadge
+                      :label="t(failureDiagnosis(run)!.retryable ? 'taskDetail.retryable' : 'taskDetail.notRetryable')"
+                      :tone="failureDiagnosis(run)!.retryable ? 'warning' : 'danger'"
+                    />
+                    <PermissionGate v-if="failureDiagnosis(run)!.retryable" area="operations" compact>
+                      <button
+                        class="secondary-button"
+                        :disabled="retryingRunIds.includes(run.id) || hasActiveRun()"
+                        type="button"
+                        @click="retryRun(run)"
+                      >
+                        {{
+                          retryingRunIds.includes(run.id)
+                            ? t('taskDetail.retryingRun')
+                            : t('taskDetail.retryRun')
+                        }}
+                      </button>
+                    </PermissionGate>
+                  </div>
                 </div>
                 <ul v-if="failureDiagnosis(run)!.suggestions.length">
                   <li v-for="suggestion in failureDiagnosis(run)!.suggestions" :key="suggestion">
@@ -693,6 +747,15 @@ onUnmounted(clearRunPolling)
   align-items: flex-start;
 }
 
+.failure-diagnosis-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .failure-diagnosis-head strong,
 .failure-diagnosis-head span {
   display: block;
@@ -824,6 +887,15 @@ th {
 
   .hero-actions {
     justify-content: start;
+  }
+
+  .failure-diagnosis-head {
+    flex-direction: column;
+  }
+
+  .failure-diagnosis-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 </style>

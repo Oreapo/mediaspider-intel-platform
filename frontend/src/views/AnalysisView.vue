@@ -12,6 +12,7 @@ import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useAnalysisJobs } from '../composables/useAnalysisJobs'
 import { useDatasets } from '../composables/useDatasets'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue } from '../composables/useEnumLabel'
 import { lastPageOffset } from '../lib/pagination'
 import { parseJsonObject, required, type ValidationErrors } from '../lib/validation'
 import type { AnalysisOutput } from '../types'
@@ -141,12 +142,6 @@ function jobTone(status: string) {
   if (status === 'running') return 'info'
   if (status === 'failed') return 'danger'
   return 'neutral'
-}
-
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
 }
 
 function scopeLabel(value: string) {

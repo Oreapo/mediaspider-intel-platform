@@ -10,6 +10,7 @@ import PermissionGate from '../components/ui/PermissionGate.vue'
 import RetryState from '../components/ui/RetryState.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue, scenarioLabel } from '../composables/useEnumLabel'
 import type { CaseDetail, CaseRecord, CollectionTask, Dataset, DatasetPreview, Signal, TaskRun } from '../types'
 
 const route = useRoute()
@@ -111,12 +112,6 @@ function statusTone(status: string) {
   return 'neutral'
 }
 
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
 onMounted(loadDetail)
 </script>
 
@@ -142,7 +137,7 @@ onMounted(loadDetail)
     <template v-else-if="signal">
       <section class="surface hero-panel">
         <div>
-          <p class="eyebrow">{{ signal.signal_type }} · {{ signal.signal_source }} · {{ signal.id }}</p>
+          <p class="eyebrow">{{ labelValue(signal.signal_type) }} · {{ signal.signal_source }} · {{ signal.id }}</p>
           <h1>{{ signal.summary }}</h1>
           <p>{{ t('signals.dataset') }}: {{ signal.dataset_id }} · {{ t('signalDetail.run') }}: {{ signal.task_run_id || '-' }}</p>
         </div>
@@ -207,7 +202,7 @@ onMounted(loadDetail)
               <div class="item-main">
                 <div>
                   <strong>{{ item.case_name }}</strong>
-                  <p>{{ item.case_type }} · {{ item.owner || '-' }}</p>
+                  <p>{{ scenarioLabel(item.case_type) }} · {{ item.owner || '-' }}</p>
                 </div>
                 <StatusBadge :label="labelValue(item.status)" :tone="statusTone(item.status)" />
               </div>

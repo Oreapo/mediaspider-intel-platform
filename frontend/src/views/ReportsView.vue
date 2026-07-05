@@ -11,6 +11,7 @@ import PermissionGate from '../components/ui/PermissionGate.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useCases } from '../composables/useCases'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue, scenarioLabel } from '../composables/useEnumLabel'
 import { useReports } from '../composables/useReports'
 import { requestConfirm } from '../lib/confirm'
 import { lastPageOffset } from '../lib/pagination'
@@ -194,20 +195,8 @@ async function downloadReportFile(reportId: string) {
   }
 }
 
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
 function reportTypeLabel(value: string) {
   const key = `reportType.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
-function scenarioLabel(value: string) {
-  const key = `scenario.${value}`
   const translated = t(key)
   return translated === key ? value : translated
 }

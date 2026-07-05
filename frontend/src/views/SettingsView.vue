@@ -16,10 +16,14 @@ import {
   updateNotificationRule,
 } from '../api/notifications'
 import AppAlert from '../components/ui/AppAlert.vue'
+import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import FieldError from '../components/ui/FieldError.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
 import PaginationBar from '../components/ui/PaginationBar.vue'
 import PermissionGate from '../components/ui/PermissionGate.vue'
+import { useI18n } from '../composables/useI18n'
+import { parseList } from '../lib/list'
+import { enumLabel as labelValue } from '../composables/useEnumLabel'
 import { useNotifications } from '../composables/useNotifications'
 import { usePlatformModels } from '../composables/usePlatformModels'
 import { usePlatformProfiles } from '../composables/usePlatformProfiles'
@@ -33,6 +37,7 @@ import {
 } from '../lib/validation'
 import type { PlatformProfileDiagnostics } from '../types'
 
+const { t } = useI18n()
 const {
   rules,
   deliveries,
@@ -107,7 +112,7 @@ const selectedChannels = computed(() => parseList(form.value.channels))
 const usesEmail = computed(() => selectedChannels.value.includes('email'))
 const usesWebhook = computed(() => selectedChannels.value.includes('webhook'))
 const profilePlatformOptions = computed(() =>
-  platformModels.value.map((item) => ({ value: item.platform, label: item.label })),
+  platformModels.value.map((item) => ({ value: item.platform, label: labelValue(item.platform) })),
 )
 
 watch(
@@ -122,18 +127,11 @@ watch(
 )
 
 const stats = computed(() => [
-  { label: '规则', value: rules.value.length },
-  { label: '已启用', value: rules.value.filter((item) => item.enabled).length },
-  { label: '未读', value: unreadCount.value },
-  { label: '投递', value: deliveryTotal.value },
+  { label: t('settings.stats.rules'), value: rules.value.length },
+  { label: t('settings.stats.enabled'), value: rules.value.filter((item) => item.enabled).length },
+  { label: t('settings.stats.unread'), value: unreadCount.value },
+  { label: t('settings.stats.deliveries'), value: deliveryTotal.value },
 ])
-
-function parseList(text: string) {
-  return text
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
 
 function channelConfig() {
   const config: Record<string, unknown> = {}
@@ -152,9 +150,9 @@ function channelConfig() {
 
 function validateProfileForm() {
   const errors: ValidationErrors = {}
-  const platformError = required(profileForm.value.platform, '平台')
-  const nameError = required(profileForm.value.profile_name, 'Profile 名称')
-  const settings = parseJsonObject(profileForm.value.settings_json, '运行设置 JSON')
+  const platformError = required(profileForm.value.platform, t('settings.profile.platform'))
+  const nameError = required(profileForm.value.profile_name, t('settings.profile.name'))
+  const settings = parseJsonObject(profileForm.value.settings_json, t('settings.profile.settingsJson'))
 
   if (platformError) errors.platform = platformError
   if (nameError) errors.profile_name = nameError
@@ -169,14 +167,16 @@ function validateProfileForm() {
 
 function validateRuleForm() {
   const errors: ValidationErrors = {}
-  const nameError = required(form.value.rule_name, '规则名称')
-  const cronError = required(form.value.cron_expr, 'Cron 表达式')
+  const nameError = required(form.value.rule_name, t('settings.rule.name'))
+  const cronError = required(form.value.cron_expr, t('settings.rule.cron'))
   const channels = parseList(form.value.channels)
-  const channelError = channels.length ? '' : '至少需要配置一个渠道。'
-  const cooldownError = nonNegativeNumber(form.value.cooldown_minutes, '冷却分钟数')
-  const webhookError = usesWebhook.value ? httpUrl(form.value.webhook_url, 'Webhook 地址') : ''
-  const smtpPortError = usesEmail.value ? nonNegativeNumber(form.value.smtp_port, 'SMTP 端口') : ''
-  const smtpTimeoutError = usesEmail.value ? nonNegativeNumber(form.value.smtp_timeout_seconds, 'SMTP 超时秒数') : ''
+  const channelError = channels.length ? '' : t('settings.rule.channelRequired')
+  const cooldownError = nonNegativeNumber(form.value.cooldown_minutes, t('settings.rule.cooldown'))
+  const webhookError = usesWebhook.value ? httpUrl(form.value.webhook_url, t('settings.rule.webhookUrl')) : ''
+  const smtpPortError = usesEmail.value ? nonNegativeNumber(form.value.smtp_port, t('settings.rule.smtpPort')) : ''
+  const smtpTimeoutError = usesEmail.value
+    ? nonNegativeNumber(form.value.smtp_timeout_seconds, t('settings.rule.smtpTimeout'))
+    : ''
 
   if (nameError) errors.rule_name = nameError
   if (cronError) errors.cron_expr = cronError
@@ -184,9 +184,9 @@ function validateRuleForm() {
   if (cooldownError) errors.cooldown_minutes = cooldownError
   if (webhookError) errors.webhook_url = webhookError
   if (usesEmail.value) {
-    const recipientsError = required(form.value.email_recipients, '邮件接收人')
-    const smtpHostError = required(form.value.smtp_host, 'SMTP 主机')
-    const smtpFromError = required(form.value.smtp_from, '发件人')
+    const recipientsError = required(form.value.email_recipients, t('settings.rule.emailRecipients'))
+    const smtpHostError = required(form.value.smtp_host, t('settings.rule.smtpHost'))
+    const smtpFromError = required(form.value.smtp_from, t('settings.rule.smtpFrom'))
     if (recipientsError) errors.email_recipients = recipientsError
     if (smtpHostError) errors.smtp_host = smtpHostError
     if (smtpFromError) errors.smtp_from = smtpFromError
@@ -203,7 +203,7 @@ async function submitProfile() {
   error.value = ''
   const validation = validateProfileForm()
   if (!validation.isValid) {
-    error.value = '请先修正 Profile 表单错误。'
+    error.value = t('settings.profile.fixErrors')
     return
   }
 
@@ -216,7 +216,7 @@ async function submitProfile() {
       credentials_ref: profileForm.value.credentials_ref,
       settings_json: validation.settingsJson,
     })
-    message.value = '平台登入 Profile 已创建。'
+    message.value = t('settings.profile.created')
     profileForm.value.profile_name = ''
     profileForm.value.credentials_ref = ''
     await fetchProfiles()
@@ -228,13 +228,13 @@ async function submitProfile() {
 }
 
 async function rotateProfile(profileId: string) {
-  const nextValue = window.prompt('输入新的 credentials_ref。留空则取消。')
+  const nextValue = window.prompt(t('settings.profile.rotatePrompt'))
   if (!nextValue) return
   message.value = ''
   error.value = ''
   try {
     await updatePlatformProfile(profileId, { credentials_ref: nextValue })
-    message.value = '登入凭据已更新。'
+    message.value = t('settings.profile.updatedCredentials')
     await fetchProfiles()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -256,9 +256,9 @@ async function inspectProfile(profileId: string) {
 
 async function removeProfile(profileId: string) {
   const confirmed = await requestConfirm({
-    title: '删除平台 Profile',
-    message: '采集任务将无法继续复用这个登录态。原始凭据不会在页面保留。确认删除吗？',
-    confirmLabel: '删除 Profile',
+    title: t('settings.profile.deleteTitle'),
+    message: t('settings.profile.deleteMessage'),
+    confirmLabel: t('settings.profile.deleteConfirm'),
   })
   if (!confirmed) return
 
@@ -268,7 +268,7 @@ async function removeProfile(profileId: string) {
     await deletePlatformProfile(profileId)
     const { [profileId]: _removed, ...rest } = profileDiagnostics.value
     profileDiagnostics.value = rest
-    message.value = '平台登入 Profile 已删除。'
+    message.value = t('settings.profile.deleted')
     await fetchProfiles()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -279,7 +279,7 @@ async function submitRule() {
   message.value = ''
   error.value = ''
   if (!validateRuleForm()) {
-    error.value = '请先修正通知规则表单错误。'
+    error.value = t('settings.rule.fixErrors')
     return
   }
 
@@ -297,7 +297,7 @@ async function submitRule() {
       cooldown_minutes: form.value.cooldown_minutes,
       channel_config_json: channelConfig(),
     })
-    message.value = '通知规则已创建。'
+    message.value = t('settings.rule.created')
     form.value.rule_name = ''
     await fetchItems()
   } catch (err) {
@@ -312,7 +312,7 @@ async function toggleRule(ruleId: string, enabled: boolean) {
   error.value = ''
   try {
     await updateNotificationRule(ruleId, { enabled })
-    message.value = enabled ? '规则已启用。' : '规则已停用。'
+    message.value = enabled ? t('settings.rule.enabledMessage') : t('settings.rule.disabledMessage')
     await fetchItems()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -321,9 +321,9 @@ async function toggleRule(ruleId: string, enabled: boolean) {
 
 async function removeRule(ruleId: string) {
   const confirmed = await requestConfirm({
-    title: '删除通知规则',
-    message: '该规则后续不会再产生 scheduled digest 投递。确认删除吗？',
-    confirmLabel: '删除规则',
+    title: t('settings.rule.deleteTitle'),
+    message: t('settings.rule.deleteMessage'),
+    confirmLabel: t('settings.rule.deleteConfirm'),
   })
   if (!confirmed) return
 
@@ -331,7 +331,7 @@ async function removeRule(ruleId: string) {
   error.value = ''
   try {
     await deleteNotificationRule(ruleId)
-    message.value = '规则已删除。'
+    message.value = t('settings.rule.deleted')
     await fetchItems()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -346,7 +346,7 @@ async function runNow() {
     const now = new Date()
     now.setSeconds(0, 0)
     runResult.value = await runScheduledNotifications(now.toISOString().replace('Z', ''))
-    message.value = '定时摘要已执行评估。'
+    message.value = t('settings.rule.scheduledRunComplete')
     await fetchItems()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -383,7 +383,8 @@ async function retryDelivery(deliveryId: string) {
   busy.value = true
   try {
     const delivery = await retryNotificationDelivery(deliveryId)
-    message.value = delivery.status === 'sent' ? '投递重试成功。' : '投递已重试，但仍然失败。'
+    message.value =
+      delivery.status === 'sent' ? t('settings.delivery.retrySucceeded') : t('settings.delivery.retryFailed')
     await fetchItems()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -405,7 +406,7 @@ async function toggleInboxRead(deliveryId: string, read: boolean) {
   error.value = ''
   try {
     await updateNotificationInboxItem(deliveryId, read)
-    message.value = read ? '通知已标记为已读。' : '通知已标记为未读。'
+    message.value = read ? t('settings.inbox.markedRead') : t('settings.inbox.markedUnread')
     await fetchItems()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -417,7 +418,7 @@ async function markAllRead() {
   error.value = ''
   try {
     const result = await markAllNotificationInboxRead()
-    message.value = `已标记 ${result.updated_count} 条通知为已读。`
+    message.value = t('settings.inbox.markAllReadResult', { count: result.updated_count })
     await fetchItems()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -427,6 +428,7 @@ async function markAllRead() {
 async function moveInboxPage(offset: number) {
   await updateInboxQuery({ offset })
 }
+
 </script>
 
 <template>
@@ -438,33 +440,36 @@ async function moveInboxPage(offset: number) {
       </article>
     </div>
 
-    <div class="split-grid">
-      <section class="surface section-card">
+    <div class="settings-workspace">
+      <aside class="settings-side-panel">
+      <section class="surface section-card settings-side-card">
         <div class="section-head">
           <div>
-            <h2>平台登入 Profile</h2>
-            <p>保存 cookie/state_file 等登录状态，采集任务通过 auth_profile_id 复用。</p>
+            <h2>{{ t('settings.profile.title') }}</h2>
+            <p>{{ t('settings.profile.description') }}</p>
           </div>
         </div>
 
-        <AppAlert v-if="platformModelsError" tone="error" title="平台模型加载失败" :message="platformModelsError" />
+        <AppAlert v-if="platformModelsError" tone="error" :title="t('settings.profile.platformLoadFailed')" :message="platformModelsError" />
         <PermissionGate area="operations">
         <form class="settings-form" @submit.prevent="submitProfile">
           <div class="grid-two">
             <label class="field">
-              <span>平台</span>
-              <select v-model="profileForm.platform" :disabled="platformModelsLoading && !profilePlatformOptions.length">
-                <option v-for="item in profilePlatformOptions" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                </option>
-              </select>
+              <span>{{ t('settings.profile.platform') }}</span>
+              <div class="select-with-icon">
+                <PlatformLogo :platform="profileForm.platform" :size="18" class="select-icon" />
+                <select v-model="profileForm.platform" :disabled="platformModelsLoading && !profilePlatformOptions.length">
+                  <option v-for="item in profilePlatformOptions" :key="item.value" :value="item.value">
+                    {{ item.label }}
+                  </option>
+                </select>
+              </div>
               <FieldError :message="profileErrors.platform" />
             </label>
             <label class="field">
-              <span>认证类型</span>
+              <span>{{ t('settings.profile.authType') }}</span>
               <select v-model="profileForm.auth_type">
                 <option value="cookie">cookie</option>
-                <option value="state_file">state_file</option>
                 <option value="qrcode">qrcode</option>
                 <option value="phone">phone</option>
               </select>
@@ -472,88 +477,50 @@ async function moveInboxPage(offset: number) {
           </div>
 
           <label class="field">
-            <span>Profile 名称</span>
-            <input v-model="profileForm.profile_name" required placeholder="例：小红书生产 Cookie" />
+            <span>{{ t('settings.profile.name') }}</span>
+            <input v-model="profileForm.profile_name" required :placeholder="t('settings.profile.namePlaceholder')" />
             <FieldError :message="profileErrors.profile_name" />
           </label>
 
           <label class="field">
             <span>credentials_ref</span>
-            <textarea v-model="profileForm.credentials_ref" rows="3" placeholder="Cookie 文本或 state_file 路径"></textarea>
+            <textarea v-model="profileForm.credentials_ref" rows="3" :placeholder="t('settings.profile.credentialsPlaceholder')"></textarea>
           </label>
 
           <label class="field">
-            <span>运行设置 JSON</span>
+            <span>{{ t('settings.profile.settingsJson') }}</span>
             <textarea v-model="profileForm.settings_json" rows="4" placeholder='{"headless": true}'></textarea>
             <FieldError :message="profileErrors.settings_json" />
           </label>
 
           <div class="actions">
             <button class="primary-button" :disabled="busy" type="submit">
-              {{ busy ? '保存中...' : '创建 Profile' }}
+              {{ busy ? t('common.saving') : t('settings.profile.create') }}
             </button>
           </div>
         </form>
         </PermissionGate>
       </section>
 
-      <section class="surface section-card">
+      <section class="surface section-card settings-side-card">
         <div class="section-head">
           <div>
-            <h2>Profile 列表</h2>
-            <p>诊断只返回脱敏信息，原始凭据不会显示在页面中。</p>
-          </div>
-        </div>
-
-        <LoadingState v-if="profilesLoading" title="正在加载平台 Profile..." />
-        <AppAlert v-else-if="profilesLoadError" tone="error" title="加载失败" :message="profilesLoadError" />
-        <div v-else class="item-list">
-          <article v-for="profile in profiles" :key="profile.id" class="list-item">
-            <div class="item-main">
-              <div>
-                <strong>{{ profile.profile_name }}</strong>
-                <p>{{ profile.platform }} · {{ profile.auth_type }} · {{ profile.id }}</p>
-              </div>
-              <span class="status-badge">{{ profile.credentials_ref ? '已配置' : '待配置' }}</span>
-            </div>
-            <div class="item-meta">
-              <span>凭据：{{ profile.credentials_ref || '-' }}</span>
-              <span>更新：{{ profile.updated_at }}</span>
-            </div>
-            <div class="actions">
-              <PermissionGate area="operations" compact>
-              <button class="secondary-button" type="button" @click="inspectProfile(profile.id)">诊断</button>
-              <button class="secondary-button" type="button" @click="rotateProfile(profile.id)">更新凭据</button>
-              <button class="secondary-button destructive" type="button" @click="removeProfile(profile.id)">删除</button>
-              </PermissionGate>
-            </div>
-            <pre v-if="profileDiagnostics[profile.id]">{{ JSON.stringify(profileDiagnostics[profile.id], null, 2) }}</pre>
-          </article>
-          <div v-if="!profiles.length" class="muted">暂无平台登入 Profile。</div>
-        </div>
-      </section>
-    </div>
-
-    <div class="split-grid">
-      <section class="surface section-card">
-        <div class="section-head">
-          <div>
-            <h2>通知规则</h2>
-            <p>配置 scheduled digest 规则，按风险、场景、平台和冷却时间过滤。</p>
+            <h2>{{ t('settings.rule.title') }}</h2>
+            <p>{{ t('settings.rule.description') }}</p>
           </div>
         </div>
 
         <PermissionGate area="operations">
         <form class="settings-form" @submit.prevent="submitRule">
           <label class="field">
-            <span>规则名称</span>
-            <input v-model="form.rule_name" required placeholder="例：高风险导流日报" />
+            <span>{{ t('settings.rule.name') }}</span>
+            <input v-model="form.rule_name" required :placeholder="t('settings.rule.namePlaceholder')" />
             <FieldError :message="ruleErrors.rule_name" />
           </label>
 
           <div class="grid-two">
             <label class="field">
-              <span>风险阈值</span>
+              <span>{{ t('settings.rule.riskThreshold') }}</span>
               <select v-model="form.risk_level_threshold">
                 <option value="low">low</option>
                 <option value="medium">medium</option>
@@ -562,7 +529,7 @@ async function moveInboxPage(offset: number) {
               </select>
             </label>
             <label class="field">
-              <span>Cron 表达式</span>
+              <span>{{ t('settings.rule.cron') }}</span>
               <input v-model="form.cron_expr" required placeholder="*/30 * * * *" />
               <FieldError :message="ruleErrors.cron_expr" />
             </label>
@@ -570,81 +537,81 @@ async function moveInboxPage(offset: number) {
 
           <div class="grid-two">
             <label class="field">
-              <span>场景</span>
+              <span>{{ t('settings.rule.scenarios') }}</span>
               <input v-model="form.scenario_types" placeholder="lead_diversion,seller_risk" />
             </label>
             <label class="field">
-              <span>平台</span>
+              <span>{{ t('settings.rule.platforms') }}</span>
               <input v-model="form.platforms" placeholder="xhs,dy,xianyu" />
             </label>
           </div>
 
           <div class="grid-two">
             <label class="field">
-              <span>渠道</span>
+              <span>{{ t('settings.rule.channels') }}</span>
               <input v-model="form.channels" required placeholder="internal_inbox,email,webhook" />
               <FieldError :message="ruleErrors.channels" />
             </label>
             <label class="field">
-              <span>冷却分钟数</span>
+              <span>{{ t('settings.rule.cooldown') }}</span>
               <input v-model.number="form.cooldown_minutes" min="0" step="1" type="number" />
               <FieldError :message="ruleErrors.cooldown_minutes" />
             </label>
           </div>
 
           <div v-if="usesEmail" class="channel-config">
-            <h3>邮件渠道</h3>
+            <h3>{{ t('settings.rule.emailChannel') }}</h3>
             <div class="grid-two">
               <label class="field">
-                <span>邮件接收人</span>
+                <span>{{ t('settings.rule.emailRecipients') }}</span>
                 <input v-model="form.email_recipients" placeholder="risk@example.com,ops@example.com" />
                 <FieldError :message="ruleErrors.email_recipients" />
               </label>
               <label class="field">
-                <span>SMTP 主机</span>
+                <span>{{ t('settings.rule.smtpHost') }}</span>
                 <input v-model="form.smtp_host" placeholder="smtp.example.com" />
                 <FieldError :message="ruleErrors.smtp_host" />
               </label>
             </div>
             <div class="grid-two">
               <label class="field">
-                <span>SMTP 端口</span>
+                <span>{{ t('settings.rule.smtpPort') }}</span>
                 <input v-model.number="form.smtp_port" min="1" step="1" type="number" />
                 <FieldError :message="ruleErrors.smtp_port" />
               </label>
               <label class="field">
-                <span>发件人</span>
+                <span>{{ t('settings.rule.smtpFrom') }}</span>
                 <input v-model="form.smtp_from" placeholder="platform@example.com" />
                 <FieldError :message="ruleErrors.smtp_from" />
               </label>
             </div>
             <div class="grid-two">
               <label class="field">
-                <span>SMTP 用户名</span>
-                <input v-model="form.smtp_username" placeholder="可选" />
+                <span>{{ t('settings.rule.smtpUsername') }}</span>
+                <input v-model="form.smtp_username" :placeholder="t('common.optional')" />
               </label>
               <label class="field">
-                <span>SMTP 密码</span>
-                <input v-model="form.smtp_password" autocomplete="new-password" placeholder="可选" type="password" />
+                <span>{{ t('settings.rule.smtpPassword') }}</span>
+                <input v-model="form.smtp_password" autocomplete="new-password" :placeholder="t('common.optional')" type="password" />
               </label>
             </div>
             <div class="grid-two">
               <label class="field">
-                <span>SMTP 超时秒数</span>
+                <span>{{ t('settings.rule.smtpTimeout') }}</span>
                 <input v-model.number="form.smtp_timeout_seconds" min="1" step="1" type="number" />
                 <FieldError :message="ruleErrors.smtp_timeout_seconds" />
               </label>
               <label class="toggle-line channel-toggle">
                 <input v-model="form.smtp_use_tls" type="checkbox" />
-                <span>启用 STARTTLS</span>
+                <span>{{ t('settings.rule.enableStarttls') }}</span>
               </label>
             </div>
           </div>
 
           <div v-if="usesWebhook" class="channel-config">
-            <h3>Webhook 渠道</h3>
+            <h3>{{ t('settings.rule.webhookChannel') }}</h3>
             <label class="field">
-              <span>Webhook 地址</span>
+              <span>{{ t('settings.rule.webhookUrl') }}</span>
               <input v-model="form.webhook_url" placeholder="https://example.test/webhook" />
               <FieldError :message="ruleErrors.webhook_url" />
             </label>
@@ -652,31 +619,76 @@ async function moveInboxPage(offset: number) {
 
           <label class="toggle-line">
             <input v-model="form.enabled" type="checkbox" />
-            <span>启用</span>
+            <span>{{ t('common.enabled') }}</span>
           </label>
 
           <div class="actions">
             <button class="primary-button" :disabled="busy" type="submit">
-              {{ busy ? '保存中...' : '创建规则' }}
+              {{ busy ? t('common.saving') : t('settings.rule.create') }}
             </button>
             <button class="secondary-button" :disabled="busy" type="button" @click="runNow">
-              立即执行定时任务
+              {{ t('settings.rule.runScheduledNow') }}
             </button>
           </div>
         </form>
         </PermissionGate>
       </section>
 
+      <AppAlert v-if="message" tone="success" :title="t('common.operationSucceeded')" :message="message" />
+      <AppAlert v-if="error" tone="error" :title="t('common.operationFailed')" :message="error" />
+      </aside>
+
+      <main class="settings-main-panel">
+      <div class="split-grid">
       <section class="surface section-card">
         <div class="section-head">
           <div>
-            <h2>规则列表</h2>
-            <p>禁用规则不会被 cron 执行；last run 只在投递记录落库后更新。</p>
+            <h2>{{ t('settings.profile.listTitle') }}</h2>
+            <p>{{ t('settings.profile.listDescription') }}</p>
           </div>
         </div>
 
-        <LoadingState v-if="isLoading" title="正在加载通知设置..." />
-        <AppAlert v-else-if="loadError" tone="error" title="加载失败" :message="loadError" />
+        <LoadingState v-if="profilesLoading" :title="t('settings.profile.loading')" />
+        <AppAlert v-else-if="profilesLoadError" tone="error" :title="t('common.loadFailed')" :message="profilesLoadError" />
+        <div v-else class="item-list">
+          <article v-for="profile in profiles" :key="profile.id" class="list-item">
+            <div class="item-main">
+              <div>
+                <strong>{{ profile.profile_name }}</strong>
+                <p class="platform-line">
+                  <PlatformLogo :platform="profile.platform" :size="16" />
+                  {{ labelValue(profile.platform) }} · {{ labelValue(profile.auth_type) }} · {{ profile.id }}
+                </p>
+              </div>
+              <span class="status-badge">{{ profile.credentials_ref ? t('settings.profile.configured') : t('settings.profile.pendingConfig') }}</span>
+            </div>
+            <div class="item-meta">
+              <span>{{ t('settings.profile.credentials') }}: {{ profile.credentials_ref || '-' }}</span>
+              <span>{{ t('common.updated') }}: {{ profile.updated_at }}</span>
+            </div>
+            <div class="actions">
+              <PermissionGate area="operations" compact>
+              <button class="secondary-button" type="button" @click="inspectProfile(profile.id)">{{ t('settings.profile.diagnose') }}</button>
+              <button class="secondary-button" type="button" @click="rotateProfile(profile.id)">{{ t('settings.profile.updateCredentials') }}</button>
+              <button class="secondary-button destructive" type="button" @click="removeProfile(profile.id)">{{ t('common.delete') }}</button>
+              </PermissionGate>
+            </div>
+            <pre v-if="profileDiagnostics[profile.id]">{{ JSON.stringify(profileDiagnostics[profile.id], null, 2) }}</pre>
+          </article>
+          <div v-if="!profiles.length" class="muted">{{ t('settings.profile.empty') }}</div>
+        </div>
+      </section>
+
+      <section class="surface section-card">
+        <div class="section-head">
+          <div>
+            <h2>{{ t('settings.rule.listTitle') }}</h2>
+            <p>{{ t('settings.rule.listDescription') }}</p>
+          </div>
+        </div>
+
+        <LoadingState v-if="isLoading" :title="t('settings.rule.loading')" />
+        <AppAlert v-else-if="loadError" tone="error" :title="t('common.loadFailed')" :message="loadError" />
         <div v-else class="item-list">
           <article v-for="item in rules" :key="item.id" class="list-item">
             <div class="item-main">
@@ -685,51 +697,48 @@ async function moveInboxPage(offset: number) {
                 <p>{{ item.event_type }} · {{ item.cron_expr }} · {{ item.risk_level_threshold }}</p>
               </div>
               <span class="status-badge" :class="{ disabled: !item.enabled }">
-                {{ item.enabled ? '已启用' : '已停用' }}
+                {{ item.enabled ? t('enum.enabled') : t('enum.disabled') }}
               </span>
             </div>
             <div class="item-meta">
-              <span>渠道：{{ item.channels.join(', ') }}</span>
-              <span>最近执行：{{ item.last_executed_at || '-' }}</span>
+              <span>{{ t('settings.rule.channels') }}: {{ item.channels.join(', ') }}</span>
+              <span>{{ t('settings.rule.lastExecuted') }}: {{ item.last_executed_at || '-' }}</span>
             </div>
             <div class="actions">
               <PermissionGate area="operations" compact>
               <button class="secondary-button" type="button" @click="toggleRule(item.id, !item.enabled)">
-                {{ item.enabled ? '停用' : '启用' }}
+                {{ item.enabled ? t('common.disable') : t('common.enable') }}
               </button>
-              <button class="secondary-button destructive" type="button" @click="removeRule(item.id)">删除</button>
+              <button class="secondary-button destructive" type="button" @click="removeRule(item.id)">{{ t('common.delete') }}</button>
               </PermissionGate>
             </div>
           </article>
-          <div v-if="!rules.length" class="muted">暂无通知规则。</div>
+          <div v-if="!rules.length" class="muted">{{ t('settings.rule.empty') }}</div>
         </div>
       </section>
     </div>
 
-    <AppAlert v-if="message" tone="success" title="操作成功" :message="message" />
-    <AppAlert v-if="error" tone="error" title="操作失败" :message="error" />
-
     <section class="surface section-card">
       <div class="section-head section-head-inline">
         <div>
-          <h2>站内通知中心</h2>
-          <p>internal_inbox 投递会进入这里，可作为平台内的待办收件箱。</p>
+          <h2>{{ t('settings.inbox.title') }}</h2>
+          <p>{{ t('settings.inbox.description') }}</p>
         </div>
         <PermissionGate area="workflow" compact>
-          <button class="secondary-button" type="button" @click="markAllRead">全部已读</button>
+          <button class="secondary-button" type="button" @click="markAllRead">{{ t('settings.inbox.markAllRead') }}</button>
         </PermissionGate>
       </div>
 
       <form class="filter-bar inbox-filter" @submit.prevent="applyInboxFilters">
-        <input v-model="inboxFilters.q" placeholder="搜索标题、目标、规则或摘要" />
+        <input v-model="inboxFilters.q" :placeholder="t('settings.inbox.searchPlaceholder')" />
         <label class="toggle-line">
           <input v-model="inboxFilters.unread_only" type="checkbox" />
-          <span>只看未读</span>
+          <span>{{ t('settings.inbox.unreadOnly') }}</span>
         </label>
-        <button class="secondary-button" :disabled="busy" type="submit">筛选</button>
+        <button class="secondary-button" :disabled="busy" type="submit">{{ t('common.filter') }}</button>
       </form>
 
-      <LoadingState v-if="isLoading" title="正在加载站内通知..." />
+      <LoadingState v-if="isLoading" :title="t('settings.inbox.loading')" />
       <div v-else class="inbox-list">
         <article v-for="item in inbox" :key="item.id" class="inbox-item" :class="{ unread: !item.read }">
           <div class="item-main">
@@ -737,21 +746,21 @@ async function moveInboxPage(offset: number) {
               <strong>{{ item.title }}</strong>
               <p>{{ item.rule_name || item.rule_id }} · {{ item.target_type }} · {{ item.created_at }}</p>
             </div>
-            <span class="status-badge" :class="{ skipped: item.read }">{{ item.read ? '已读' : '未读' }}</span>
+            <span class="status-badge" :class="{ skipped: item.read }">{{ item.read ? t('settings.inbox.read') : t('settings.inbox.unread') }}</span>
           </div>
           <div class="item-meta">
-            <span>{{ item.summary || '暂无摘要' }}</span>
-            <span>事件数：{{ item.event_count }} · 目标：{{ item.target_id }}</span>
+            <span>{{ item.summary || t('settings.inbox.noSummary') }}</span>
+            <span>{{ t('settings.inbox.eventTarget', { count: item.event_count, targetId: item.target_id }) }}</span>
           </div>
           <div class="actions">
             <PermissionGate area="workflow" compact>
             <button class="secondary-button" type="button" @click="toggleInboxRead(item.id, !item.read)">
-              {{ item.read ? '标记未读' : '标记已读' }}
+              {{ item.read ? t('settings.inbox.markUnread') : t('settings.inbox.markRead') }}
             </button>
             </PermissionGate>
           </div>
         </article>
-        <div v-if="!inbox.length" class="muted">暂无站内通知。</div>
+        <div v-if="!inbox.length" class="muted">{{ t('settings.inbox.empty') }}</div>
       </div>
 
       <PaginationBar
@@ -767,34 +776,34 @@ async function moveInboxPage(offset: number) {
       <section class="surface section-card">
         <div class="section-head">
           <div>
-            <h2>投递记录</h2>
-            <p>可按状态、通道、目标类型和关键词追踪最近的投递结果。</p>
+            <h2>{{ t('settings.delivery.title') }}</h2>
+            <p>{{ t('settings.delivery.description') }}</p>
           </div>
         </div>
 
         <form class="filter-bar" @submit.prevent="applyDeliveryFilters">
-          <input v-model="deliveryFilters.q" placeholder="搜索投递、目标或错误" />
+          <input v-model="deliveryFilters.q" :placeholder="t('settings.delivery.searchPlaceholder')" />
           <select v-model="deliveryFilters.status">
-            <option value="">全部状态</option>
-            <option value="sent">已发送</option>
-            <option value="failed">失败</option>
-            <option value="skipped">已跳过</option>
+            <option value="">{{ t('settings.delivery.allStatuses') }}</option>
+            <option value="sent">{{ t('enum.sent') }}</option>
+            <option value="failed">{{ t('enum.failed') }}</option>
+            <option value="skipped">{{ t('enum.skipped') }}</option>
           </select>
           <select v-model="deliveryFilters.channel">
-            <option value="">全部渠道</option>
+            <option value="">{{ t('settings.delivery.allChannels') }}</option>
             <option value="internal_inbox">internal_inbox</option>
             <option value="email">email</option>
             <option value="webhook">webhook</option>
           </select>
           <select v-model="deliveryFilters.target_type">
-            <option value="">全部目标</option>
+            <option value="">{{ t('settings.delivery.allTargets') }}</option>
             <option value="signal">signal</option>
             <option value="case">case</option>
             <option value="evidence_packet">evidence_packet</option>
             <option value="scheduled_digest">scheduled_digest</option>
           </select>
-          <button class="secondary-button" :disabled="busy" type="submit">筛选</button>
-          <button class="secondary-button" :disabled="busy" type="button" @click="resetDeliveryFilters">重置</button>
+          <button class="secondary-button" :disabled="busy" type="submit">{{ t('common.filter') }}</button>
+          <button class="secondary-button" :disabled="busy" type="button" @click="resetDeliveryFilters">{{ t('common.reset') }}</button>
         </form>
 
         <div class="item-list">
@@ -804,20 +813,20 @@ async function moveInboxPage(offset: number) {
                 <strong>{{ item.target_type }} · {{ item.target_id }}</strong>
                 <p>{{ item.channel }} · {{ item.created_at }}</p>
               </div>
-              <span class="status-badge" :class="item.status">{{ item.status }}</span>
+              <span class="status-badge" :class="item.status">{{ labelValue(item.status) }}</span>
             </div>
             <div v-if="item.error_message" class="error-text">{{ item.error_message }}</div>
             <div class="item-meta">
-              <span>重试次数：{{ item.retry_count }}</span>
-              <span>最近尝试：{{ item.last_attempt_at || '-' }}</span>
+              <span>{{ t('settings.delivery.retryCount') }}: {{ item.retry_count }}</span>
+              <span>{{ t('settings.delivery.lastAttempt') }}: {{ item.last_attempt_at || '-' }}</span>
             </div>
             <div v-if="item.status === 'failed'" class="actions">
               <PermissionGate area="operations" compact>
-              <button class="secondary-button" :disabled="busy" type="button" @click="retryDelivery(item.id)">重试投递</button>
+              <button class="secondary-button" :disabled="busy" type="button" @click="retryDelivery(item.id)">{{ t('settings.delivery.retry') }}</button>
               </PermissionGate>
             </div>
           </article>
-          <div v-if="!deliveries.length" class="muted">暂无投递记录。</div>
+          <div v-if="!deliveries.length" class="muted">{{ t('settings.delivery.empty') }}</div>
         </div>
 
         <PaginationBar
@@ -832,13 +841,15 @@ async function moveInboxPage(offset: number) {
       <section class="surface section-card">
         <div class="section-head">
           <div>
-            <h2>最近运行</h2>
-            <p>手动运行 scheduled digest 的结果摘要。</p>
+            <h2>{{ t('settings.runResult.title') }}</h2>
+            <p>{{ t('settings.runResult.description') }}</p>
           </div>
         </div>
         <pre v-if="runResult">{{ JSON.stringify(runResult, null, 2) }}</pre>
-        <div v-else class="muted">暂无运行结果。</div>
+        <div v-else class="muted">{{ t('settings.runResult.empty') }}</div>
       </section>
+    </div>
+      </main>
     </div>
   </section>
 </template>
@@ -875,6 +886,45 @@ async function moveInboxPage(offset: number) {
   grid-template-columns: minmax(480px, 0.95fr) minmax(460px, 1.05fr);
   gap: 16px;
   align-items: start;
+}
+
+.settings-workspace {
+  display: grid;
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-side-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 104px);
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.settings-main-panel {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.settings-side-panel .grid-two,
+.settings-side-panel .filter-bar {
+  grid-template-columns: 1fr;
+}
+
+.settings-side-panel .actions {
+  display: grid;
+}
+
+.settings-side-panel .primary-button,
+.settings-side-panel .secondary-button {
+  width: 100%;
 }
 
 .section-card,
@@ -963,6 +1013,29 @@ async function moveInboxPage(offset: number) {
 .field textarea {
   resize: vertical;
   min-height: 86px;
+}
+
+.select-with-icon {
+  position: relative;
+}
+
+.select-with-icon .select-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #0f766e;
+  pointer-events: none;
+}
+
+.select-with-icon select {
+  padding-left: 38px;
+}
+
+.platform-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .toggle-line {
@@ -1106,6 +1179,17 @@ pre {
 @media (max-width: 980px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-side-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .split-grid,

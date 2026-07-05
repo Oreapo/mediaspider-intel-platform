@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { useI18n } from '../../composables/useI18n'
+
 defineProps<{
   title?: string
   description?: string
 }>()
+
+const { t } = useI18n()
 </script>
 
 <template>
@@ -11,7 +15,7 @@ defineProps<{
       <span />
     </div>
     <div>
-      <strong>{{ title || '暂无数据' }}</strong>
+      <strong>{{ title || t('common.noData') }}</strong>
       <p v-if="description">{{ description }}</p>
     </div>
   </div>

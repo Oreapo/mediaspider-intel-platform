@@ -446,6 +446,8 @@ export interface DashboardSummary {
       dataset_count: number
       signal_count: number
       high_risk_signal_count: number
+      risk_levels: Record<string, number>
+      signal_types: Record<string, number>
       entity_count: number
     }>
     scenarios: Array<{

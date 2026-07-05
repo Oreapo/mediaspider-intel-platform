@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
+import AppIcon from '../components/ui/AppIcon.vue'
+import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import { useDashboardSummary } from '../composables/useDashboardSummary'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue, scenarioLabel } from '../composables/useEnumLabel'
 import { usePlatformModels } from '../composables/usePlatformModels'
 
 const { items: platformItems, isLoading: platformsLoading, error: platformsError } = usePlatformModels()
@@ -61,6 +64,33 @@ const caseStatusRows = computed(() =>
 )
 const platformRiskRows = computed(() => data.value?.risk_distribution.platforms ?? [])
 const scenarioRiskRows = computed(() => data.value?.risk_distribution.scenarios ?? [])
+const platformCompareRows = computed(() => {
+  const rows = platformRiskRows.value
+  const dimensionMax = {
+    signals: Math.max(...rows.map((row) => row.signal_count), 1),
+    datasets: Math.max(...rows.map((row) => row.dataset_count), 1),
+    high: Math.max(...rows.map((row) => row.high_risk_signal_count), 1),
+    entities: Math.max(...rows.map((row) => row.entity_count), 1),
+  }
+  const riskOrder = ['critical', 'high', 'medium', 'low']
+  return rows.map((row) => ({
+    key: row.key,
+    highRiskRatio: row.signal_count
+      ? Math.round((row.high_risk_signal_count / row.signal_count) * 100)
+      : 0,
+    topSignalType: Object.entries(row.signal_types ?? {}).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '',
+    riskSegments: riskOrder
+      .map((level) => ({ tone: level, value: row.risk_levels?.[level] ?? 0 }))
+      .filter((segment) => segment.value > 0),
+    dims: [
+      { label: t('dashboard.signals'), value: row.signal_count, max: dimensionMax.signals, tone: 'signals' },
+      { label: t('dashboard.datasets'), value: row.dataset_count, max: dimensionMax.datasets, tone: 'datasets' },
+      { label: t('dashboard.highRiskShort'), value: row.high_risk_signal_count, max: dimensionMax.high, tone: 'high' },
+      { label: t('dashboard.entities'), value: row.entity_count, max: dimensionMax.entities, tone: 'entities' },
+    ],
+  }))
+})
+
 const signalRiskChartRows = computed(() => toChartRows(signalRiskRows.value))
 const signalStatusChartRows = computed(() => toChartRows(signalStatusRows.value))
 const casePriorityChartRows = computed(() => toChartRows(casePriorityRows.value))
@@ -289,17 +319,6 @@ function donutStyle(rows: Array<{ tone: string; value: number }>, total: number)
   return { background: `conic-gradient(${segments.join(', ')})` }
 }
 
-function scenarioLabel(value: string) {
-  const key = `scenario.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
 </script>
 
 <template>
@@ -323,10 +342,13 @@ function labelValue(value: string) {
     </section>
 
     <section class="analytics-board">
-      <div class="analytics-head">
-        <span class="eyebrow">{{ t('dashboard.biEyebrow') }}</span>
-        <h2>{{ t('dashboard.biTitle') }}</h2>
-        <p>{{ t('dashboard.biDescription') }}</p>
+      <div class="analytics-head with-icon">
+        <span class="head-icon"><AppIcon name="chart" :size="20" /></span>
+        <div>
+          <span class="eyebrow">{{ t('dashboard.biEyebrow') }}</span>
+          <h2>{{ t('dashboard.biTitle') }}</h2>
+          <p>{{ t('dashboard.biDescription') }}</p>
+        </div>
       </div>
 
       <div class="surface kpi-strip">
@@ -482,7 +504,59 @@ function labelValue(value: string) {
     </section>
 
     <section class="surface section-card">
-      <div class="section-head board-head">
+      <div class="section-head board-head with-icon">
+        <span class="head-icon"><AppIcon name="columns" :size="20" /></span>
+        <div>
+          <h2>{{ t('dashboard.platformCompareTitle') }}</h2>
+          <p>{{ t('dashboard.platformCompareDescription') }}</p>
+        </div>
+      </div>
+      <div v-if="platformCompareRows.length" class="platform-compare-grid">
+        <RouterLink
+          v-for="row in platformCompareRows"
+          :key="row.key"
+          :to="`/datasets?platform=${row.key}`"
+          class="platform-card"
+          :title="t('dashboard.viewPlatformData')"
+        >
+          <div class="platform-card-head">
+            <span class="platform-emblem"><PlatformLogo :platform="row.key" :size="20" /></span>
+            <strong>{{ labelValue(row.key) }}</strong>
+            <small class="ratio" :class="{ hot: row.highRiskRatio >= 50 }">
+              {{ t('dashboard.highRiskRatio') }} {{ row.highRiskRatio }}%
+            </small>
+          </div>
+          <small v-if="row.topSignalType" class="top-signal">
+            {{ t('dashboard.dominantSignal') }} · {{ labelValue(row.topSignalType) }}
+          </small>
+          <div v-if="row.riskSegments.length" class="risk-segments">
+            <span
+              v-for="seg in row.riskSegments"
+              :key="seg.tone"
+              :style="{ flexGrow: seg.value, background: chartColor(seg.tone) }"
+              :title="`${labelValue(seg.tone)} ${seg.value}`"
+            />
+          </div>
+          <div class="platform-dims">
+            <article v-for="dim in row.dims" :key="dim.tone" class="chart-row compact-row">
+              <div class="chart-row-label">
+                <i :style="{ background: chartColor(dim.tone) }" />
+                <span>{{ dim.label }}</span>
+                <strong>{{ dim.value }}</strong>
+              </div>
+              <div class="bar-track">
+                <span :style="barStyle(dim.tone, dim.value, dim.max)" />
+              </div>
+            </article>
+          </div>
+        </RouterLink>
+      </div>
+      <div v-else class="muted">{{ t('dashboard.noPlatformRiskData') }}</div>
+    </section>
+
+    <section class="surface section-card">
+      <div class="section-head board-head with-icon">
+        <span class="head-icon"><AppIcon name="briefcase" :size="20" /></span>
         <div>
           <h2>{{ t('dashboard.workBoard') }}</h2>
           <p>{{ t('dashboard.workBoardDescription') }}</p>
@@ -538,7 +612,7 @@ function labelValue(value: string) {
         <div class="compact-list">
           <article v-for="item in readyCases" :key="item.id" class="compact-item">
             <strong>{{ item.case_name }}</strong>
-            <span>{{ labelValue(item.priority) }} · {{ labelValue(item.status) }} · {{ item.case_type }}</span>
+            <span>{{ labelValue(item.priority) }} · {{ labelValue(item.status) }} · {{ scenarioLabel(item.case_type) }}</span>
           </article>
           <div v-if="!readyCases.length" class="muted">{{ t('dashboard.noReadyEvidenceCases') }}</div>
         </div>
@@ -556,7 +630,7 @@ function labelValue(value: string) {
         <div class="compact-list">
           <article v-for="item in failedRuns" :key="item.id" class="compact-item">
             <strong>{{ item.task_id }}</strong>
-            <span>{{ item.status }} · {{ item.error_message || item.finished_at || '-' }}</span>
+            <span>{{ labelValue(item.status) }} · {{ item.error_message || item.finished_at || '-' }}</span>
           </article>
           <div v-if="!failedRuns.length" class="muted">{{ t('dashboard.noFailedRuns') }}</div>
         </div>
@@ -588,7 +662,7 @@ function labelValue(value: string) {
         <div v-else-if="platformsError" class="muted">{{ platformsError }}</div>
         <div v-else class="chip-grid">
           <article v-for="item in platformItems" :key="item.platform" class="chip-card">
-            <strong>{{ item.label }}</strong>
+            <strong class="platform-line"><PlatformLogo :platform="item.platform" :size="16" /> {{ labelValue(item.platform) }}</strong>
             <span>
               {{ t('dashboard.extractorCount', { count: item.supported_signal_extractors.length }) }}
               ·
@@ -731,6 +805,112 @@ function labelValue(value: string) {
 
 .board-head {
   margin-bottom: 18px;
+}
+
+.with-icon {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.head-icon {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  border: 1px solid rgba(21, 94, 117, 0.18);
+  background: rgba(240, 253, 250, 0.92);
+  color: #0f766e;
+}
+
+.platform-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+  gap: 12px;
+}
+
+.platform-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(215, 224, 234, 0.86);
+  background: rgba(248, 250, 252, 0.84);
+  color: inherit;
+  text-decoration: none;
+  transition: transform 150ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.platform-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(21, 94, 117, 0.28);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
+}
+
+.platform-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.platform-emblem {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(215, 224, 234, 0.86);
+  color: #0f766e;
+}
+
+.platform-card-head strong {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ratio {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.82);
+  color: #475569;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.ratio.hot {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.top-signal {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.risk-segments {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.risk-segments span {
+  flex-basis: 0;
+  min-width: 3px;
+  border-radius: 2px;
+}
+
+.platform-dims {
+  display: grid;
+  gap: 8px;
 }
 
 .section-head h2 {
@@ -1149,6 +1329,12 @@ function labelValue(value: string) {
 .compact-item strong {
   display: block;
   margin-bottom: 6px;
+}
+
+.chip-card strong.platform-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .breakdown-grid,

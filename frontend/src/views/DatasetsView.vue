@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { createDataset, deleteDataset, previewDataset } from '../api/datasets'
 import AppAlert from '../components/ui/AppAlert.vue'
+import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -11,6 +13,7 @@ import PermissionGate from '../components/ui/PermissionGate.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useDatasets } from '../composables/useDatasets'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue, scenarioLabel } from '../composables/useEnumLabel'
 import { usePlatformModels } from '../composables/usePlatformModels'
 import { requestConfirm } from '../lib/confirm'
 import { lastPageOffset } from '../lib/pagination'
@@ -50,6 +53,15 @@ const creating = ref(false)
 const message = ref('')
 const error = ref('')
 const formErrors = ref<ValidationErrors>({})
+
+// Drill-down from the dashboard platform comparison: /datasets?platform=xhs
+const route = useRoute()
+if (typeof route.query.platform === 'string' && route.query.platform) {
+  filters.value.source_platform = route.query.platform
+}
+onMounted(() => {
+  if (filters.value.source_platform) void fetchDatasetPage()
+})
 
 const scenarioOptions = computed(() => [
   { value: 'lead_diversion', label: t('scenario.lead_diversion') },
@@ -191,13 +203,6 @@ async function removeDataset(datasetId: string) {
   }
 }
 
-function scenarioLabel(value?: string | null) {
-  if (!value) return '-'
-  const key = `scenario.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
 function datasetTypeLabel(value: string) {
   const key = `datasetType.${value}`
   const translated = t(key)
@@ -221,11 +226,14 @@ function datasetTypeLabel(value: string) {
 
           <label class="field">
             <span>{{ t('datasets.sourcePlatform') }}</span>
-            <select v-model="form.source_platform">
-              <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                {{ item.label }}
-              </option>
-            </select>
+            <div class="select-with-icon">
+              <PlatformLogo :platform="form.source_platform" :size="18" class="select-icon" />
+              <select v-model="form.source_platform">
+                <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
+                  {{ labelValue(item.platform) }}
+                </option>
+              </select>
+            </div>
           </label>
         </div>
 
@@ -288,12 +296,15 @@ function datasetTypeLabel(value: string) {
 
           <label class="field">
             <span>{{ t('tasks.platform') }}</span>
-            <select v-model="filters.source_platform">
-              <option value="">{{ t('tasks.allPlatforms') }}</option>
-              <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                {{ item.label }}
-              </option>
-            </select>
+            <div class="select-with-icon">
+              <PlatformLogo v-if="filters.source_platform" :platform="filters.source_platform" :size="18" class="select-icon" />
+              <select v-model="filters.source_platform" :class="{ 'no-icon': !filters.source_platform }">
+                <option value="">{{ t('tasks.allPlatforms') }}</option>
+                <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
+                  {{ labelValue(item.platform) }}
+                </option>
+              </select>
+            </div>
           </label>
 
           <label class="field">
@@ -337,8 +348,9 @@ function datasetTypeLabel(value: string) {
             <div class="dataset-main">
               <div>
                 <strong>{{ item.dataset_name }}</strong>
-                <p>
-                  {{ item.source_platform }} · {{ scenarioLabel(item.scenario_type) }} ·
+                <p class="platform-line">
+                  <PlatformLogo :platform="item.source_platform" :size="16" />
+                  {{ labelValue(item.source_platform) }} · {{ scenarioLabel(item.scenario_type) }} ·
                   {{ datasetTypeLabel(item.dataset_type) }} ·
                   {{ t('datasets.recordCount', { count: item.record_count }) }}
                 </p>
@@ -497,6 +509,33 @@ function datasetTypeLabel(value: string) {
   border-radius: 14px;
   border: 1px solid rgba(203, 213, 225, 0.95);
   background: rgba(255, 255, 255, 0.94);
+}
+
+.select-with-icon {
+  position: relative;
+}
+
+.select-with-icon .select-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #0f766e;
+  pointer-events: none;
+}
+
+.select-with-icon select {
+  padding-left: 38px;
+}
+
+.select-with-icon select.no-icon {
+  padding-left: 14px;
+}
+
+.platform-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .dataset-item {

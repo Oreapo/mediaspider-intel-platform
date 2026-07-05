@@ -34,6 +34,21 @@ export interface SignalListResult {
   total: number
 }
 
+export interface SignalExtractionResult {
+  message: string
+  signals: Signal[]
+  created_count: number
+  dedupe_enabled: boolean
+}
+
+export interface SignalCluster {
+  contact_point: string
+  signal_ids: string[]
+  signal_count: number
+  risk_levels: Record<string, number>
+  max_risk_score: number
+}
+
 function queryString(filters?: SignalListFilters) {
   const params = new URLSearchParams()
   Object.entries(filters || {}).forEach(([key, value]) => {
@@ -68,8 +83,14 @@ export async function createSignal(payload: SignalCreatePayload) {
 }
 
 export async function extractSignals(payload: SignalExtractionPayload) {
-  const response = await http.post<{ signals: Signal[] }>('/signals/extract', payload)
-  return response.signals
+  return http.post<SignalExtractionResult>('/signals/extract', payload)
+}
+
+export async function listSignalClusters(datasetId: string) {
+  const response = await http.get<{ clusters: SignalCluster[]; total: number }>(
+    `/signals/clusters?dataset_id=${encodeURIComponent(datasetId)}`,
+  )
+  return response.clusters
 }
 
 export async function updateSignalStatus(signalId: string, status: string) {

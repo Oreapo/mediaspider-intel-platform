@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { createSignal, deleteSignal, extractSignals, updateSignalStatus } from '../api/signals'
+import { createSignal, deleteSignal, extractSignals, listSignalClusters, updateSignalStatus, type SignalCluster } from '../api/signals'
 import AppAlert from '../components/ui/AppAlert.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -11,6 +11,8 @@ import PermissionGate from '../components/ui/PermissionGate.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useDatasets } from '../composables/useDatasets'
 import { useI18n } from '../composables/useI18n'
+import { parseList } from '../lib/list'
+import { enumLabel as labelValue, scenarioLabel as datasetScenarioLabel } from '../composables/useEnumLabel'
 import { useSignals } from '../composables/useSignals'
 import { requestConfirm } from '../lib/confirm'
 import { lastPageOffset } from '../lib/pagination'
@@ -49,6 +51,7 @@ const filters = ref({
   offset: 0,
 })
 const selectedSignalId = ref('')
+const clusters = ref<SignalCluster[]>([])
 const message = ref('')
 const error = ref('')
 const busy = ref(false)
@@ -72,13 +75,6 @@ const signalStats = computed(() => {
 const signalTypes = computed(() =>
   Array.from(new Set(signalItems.value.map((item) => item.signal_type))).sort(),
 )
-
-function parseList(text: string) {
-  return text
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
 
 function sourceRef(signal: { payload_json: Record<string, unknown> }) {
   const ref = signal.payload_json.source_ref
@@ -118,6 +114,20 @@ async function applyFilters() {
   selectedSignalId.value = ''
   filters.value.offset = 0
   await fetchSignalPage()
+  await loadClusters()
+}
+
+// Candidate gangs (团伙) grouped by shared contact point for the filtered dataset.
+async function loadClusters() {
+  if (!filters.value.dataset_id) {
+    clusters.value = []
+    return
+  }
+  try {
+    clusters.value = await listSignalClusters(filters.value.dataset_id)
+  } catch {
+    clusters.value = []
+  }
 }
 
 async function fetchSignalPage() {
@@ -166,12 +176,14 @@ async function submitExtraction() {
 
   busy.value = true
   try {
-    const signals = await extractSignals({
+    const result = await extractSignals({
       dataset_id: extractionForm.value.dataset_id,
       extractors: parseList(extractionForm.value.extractors),
       limit: extractionForm.value.limit,
     })
-    message.value = t('signals.extractedMessage', { count: signals.length })
+    message.value = result.created_count > 0
+      ? t('signals.extractedMessage', { count: result.created_count })
+      : t('signals.extractDedupedMessage')
     await fetchSignalPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -261,18 +273,6 @@ function statusTone(status: string) {
   return 'neutral'
 }
 
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
-function datasetScenarioLabel(value?: string | null) {
-  if (!value) return '-'
-  const key = `scenario.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
 </script>
 
 <template>
@@ -435,6 +435,26 @@ function datasetScenarioLabel(value?: string | null) {
       </form>
     </BaseSection>
 
+    <BaseSection
+      v-if="filters.dataset_id && clusters.length"
+      :title="t('signals.clustersTitle')"
+      :description="t('signals.clustersDescription')"
+    >
+      <div class="cluster-grid">
+        <article v-for="cluster in clusters" :key="cluster.contact_point" class="cluster-card">
+          <div class="cluster-head">
+            <strong>{{ cluster.contact_point }}</strong>
+            <small>{{ t('signals.clusterSignalCount', { count: cluster.signal_count }) }}</small>
+          </div>
+          <div class="cluster-risks">
+            <span v-for="(count, level) in cluster.risk_levels" :key="level" class="cluster-risk">
+              {{ labelValue(String(level)) }} · {{ count }}
+            </span>
+          </div>
+        </article>
+      </div>
+    </BaseSection>
+
     <div class="split-grid">
       <BaseSection :title="t('signals.queueTitle')" :description="t('signals.queueDescription')">
         <LoadingState v-if="signalsLoading" :title="t('signals.loading')" />
@@ -444,7 +464,7 @@ function datasetScenarioLabel(value?: string | null) {
             <div class="signal-main">
               <div>
                 <strong>{{ item.summary }}</strong>
-                <p>{{ item.signal_type }} · {{ item.signal_source }} · {{ t('signals.score', { score: item.risk_score }) }}</p>
+                <p>{{ labelValue(item.signal_type) }} · {{ item.signal_source }} · {{ t('signals.score', { score: item.risk_score }) }}</p>
               </div>
               <div class="badge-stack">
                 <StatusBadge :label="labelValue(item.risk_level)" :tone="riskTone(item.risk_level)" />
@@ -794,5 +814,54 @@ pre {
   .filter-form {
     grid-template-columns: 1fr;
   }
+}
+
+.cluster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.cluster-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(215, 224, 234, 0.86);
+  background: rgba(248, 250, 252, 0.84);
+}
+
+.cluster-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cluster-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.cluster-head small {
+  flex-shrink: 0;
+  color: #64748b;
+  font-weight: 800;
+}
+
+.cluster-risks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cluster-risk {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.82);
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
 }
 </style>

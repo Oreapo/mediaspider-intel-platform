@@ -10,6 +10,7 @@ import {
   updateEntityStatus,
 } from '../api/entities'
 import AppAlert from '../components/ui/AppAlert.vue'
+import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -19,6 +20,7 @@ import PermissionGate from '../components/ui/PermissionGate.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useEntities } from '../composables/useEntities'
 import { useI18n } from '../composables/useI18n'
+import { enumLabel as labelValue, scenarioLabel } from '../composables/useEnumLabel'
 import { usePlatformModels } from '../composables/usePlatformModels'
 import { useSignals } from '../composables/useSignals'
 import { requestConfirm } from '../lib/confirm'
@@ -410,19 +412,6 @@ async function removeEntity(entityId: string) {
   }
 }
 
-function labelValue(value: string) {
-  const key = `enum.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
-function scenarioLabel(value?: string | null) {
-  if (!value) return '-'
-  const key = `scenario.${value}`
-  const translated = t(key)
-  return translated === key ? value : translated
-}
-
 function entityStatusTone(status: string) {
   if (status === 'active') return 'success'
   if (status === 'merged') return 'warning'
@@ -503,11 +492,14 @@ function entityStatusTone(status: string) {
                   </label>
                   <label class="field">
                     <span>{{ t('entities.platform') }}</span>
-                    <select v-model="manualForm.platform">
-                      <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                        {{ item.label }}
-                      </option>
-                    </select>
+                    <div class="select-with-icon">
+                      <PlatformLogo :platform="manualForm.platform" :size="18" class="select-icon" />
+                      <select v-model="manualForm.platform">
+                        <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
+                          {{ labelValue(item.platform) }}
+                        </option>
+                      </select>
+                    </div>
                   </label>
                 </div>
 
@@ -545,7 +537,7 @@ function entityStatusTone(status: string) {
                     <select v-model="relationForm.source_entity_id" required>
                       <option value="" disabled>{{ t('entities.chooseSource') }}</option>
                       <option v-for="item in entityItems" :key="item.id" :value="item.id">
-                        {{ item.display_name }} · {{ item.entity_type }}
+                        {{ item.display_name }} · {{ labelValue(item.entity_type) }}
                       </option>
                     </select>
                     <FieldError :message="relationErrors.source_entity_id" />
@@ -555,7 +547,7 @@ function entityStatusTone(status: string) {
                     <select v-model="relationForm.target_entity_id" required>
                       <option value="" disabled>{{ t('entities.chooseTarget') }}</option>
                       <option v-for="item in entityItems" :key="item.id" :value="item.id">
-                        {{ item.display_name }} · {{ item.entity_type }}
+                        {{ item.display_name }} · {{ labelValue(item.entity_type) }}
                       </option>
                     </select>
                     <FieldError :message="relationErrors.target_entity_id" />
@@ -636,12 +628,15 @@ function entityStatusTone(status: string) {
 
           <label class="field">
             <span>{{ t('entities.platform') }}</span>
-            <select v-model="filters.platform">
-              <option value="">{{ t('entities.allPlatforms') }}</option>
-              <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                {{ item.label }}
-              </option>
-            </select>
+            <div class="select-with-icon">
+              <PlatformLogo v-if="filters.platform" :platform="filters.platform" :size="18" class="select-icon" />
+              <select v-model="filters.platform" :class="{ 'no-icon': !filters.platform }">
+                <option value="">{{ t('entities.allPlatforms') }}</option>
+                <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
+                  {{ labelValue(item.platform) }}
+                </option>
+              </select>
+            </div>
           </label>
 
           <label class="field">
@@ -685,7 +680,10 @@ function entityStatusTone(status: string) {
             <div class="entity-main">
               <div>
                 <strong>{{ item.display_name }}</strong>
-                <p>{{ item.platform }} · {{ item.entity_type }} · score {{ item.risk_score }}</p>
+                <p class="platform-line">
+                  <PlatformLogo :platform="item.platform" :size="16" />
+                  {{ labelValue(item.platform) }} · {{ labelValue(item.entity_type) }} · score {{ item.risk_score }}
+                </p>
               </div>
               <div class="badge-stack">
               <StatusBadge :label="labelValue(item.status)" :tone="entityStatusTone(item.status)" />
@@ -719,7 +717,10 @@ function entityStatusTone(status: string) {
         <div v-if="selectedDetail" class="detail-wrap">
           <div class="detail-card">
             <strong>{{ selectedDetail.entity.display_name }}</strong>
-            <p>{{ selectedDetail.entity.platform }} · {{ selectedDetail.entity.entity_type }}</p>
+            <p class="platform-line">
+              <PlatformLogo :platform="selectedDetail.entity.platform" :size="16" />
+              {{ labelValue(selectedDetail.entity.platform) }} · {{ labelValue(selectedDetail.entity.entity_type) }}
+            </p>
             <pre>{{ JSON.stringify(selectedDetail.entity.source_ref, null, 2) }}</pre>
           </div>
 
@@ -773,7 +774,7 @@ function entityStatusTone(status: string) {
             <h3>{{ t('entities.signals') }}</h3>
             <article v-for="item in selectedDetail.signals" :key="item.id" class="compact-item">
               <strong>{{ item.summary }}</strong>
-              <span>{{ item.signal_type }} · {{ labelValue(item.status) }}</span>
+              <span>{{ labelValue(item.signal_type) }} · {{ labelValue(item.status) }}</span>
             </article>
             <EmptyState v-if="!selectedDetail.signals.length" :title="t('entities.noSignals')" />
           </div>
@@ -782,7 +783,7 @@ function entityStatusTone(status: string) {
             <h3>{{ t('entities.relations') }}</h3>
             <article v-for="item in selectedDetail.relations" :key="item.id" class="compact-item">
               <strong>{{ entityName(item.source_entity_id) }} -> {{ entityName(item.target_entity_id) }}</strong>
-              <span>{{ item.relation_type }} · {{ item.confidence }}</span>
+              <span>{{ labelValue(item.relation_type) }} · {{ item.confidence }}</span>
             </article>
             <EmptyState v-if="!selectedDetail.relations.length" :title="t('entities.noRelations')" />
           </div>
@@ -928,6 +929,33 @@ function entityStatusTone(status: string) {
   border-radius: 14px;
   border: 1px solid rgba(203, 213, 225, 0.95);
   background: rgba(255, 255, 255, 0.94);
+}
+
+.select-with-icon {
+  position: relative;
+}
+
+.select-with-icon .select-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #0f766e;
+  pointer-events: none;
+}
+
+.select-with-icon select {
+  padding-left: 38px;
+}
+
+.select-with-icon select.no-icon {
+  padding-left: 14px;
+}
+
+.platform-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .entity-item,

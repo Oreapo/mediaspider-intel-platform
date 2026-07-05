@@ -12,7 +12,6 @@ function getInitialLocale(): Locale {
   const stored = window.localStorage.getItem(storageKey)
   if (isLocale(stored)) return stored
   const browserLocale = window.navigator.language
-  if (browserLocale.startsWith('zh-TW') || browserLocale.startsWith('zh-HK')) return 'zh-TW'
   if (browserLocale.startsWith('en')) return 'en-US'
   return defaultLocale
 }

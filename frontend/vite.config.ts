@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
     process.env.MEDIASPIDER_API_TARGET ||
     env.MEDIASPIDER_API_TARGET ||
     'http://127.0.0.1:8180'
+  const frontendPort = Number(process.env.MEDIASPIDER_FRONTEND_PORT || env.MEDIASPIDER_FRONTEND_PORT || 5200)
   const apiProxy = {
     '/api': {
       target: apiTarget,
@@ -28,7 +29,7 @@ export default defineConfig(({ mode }) => {
     plugins: [vue()],
     server: {
       host: '127.0.0.1',
-      port: 5173,
+      port: frontendPort,
       fs: {
         allow: [frontendRoot],
       },

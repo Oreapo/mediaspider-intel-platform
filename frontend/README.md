@@ -11,14 +11,17 @@ npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
-Open http://127.0.0.1:5173.
+Open http://127.0.0.1:5200.
 
 Vite proxies `/api` and `/health` to `MEDIASPIDER_API_TARGET`, which defaults to http://127.0.0.1:8180.
 
 ## Build
 
 ```powershell
+npm --prefix frontend run check:i18n
 npm --prefix frontend run build
 ```
+
+The i18n check verifies that all supported locales expose the same message keys and placeholder names.
 
 The production Docker image serves the generated application through Nginx and proxies API requests to the backend container.

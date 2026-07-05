@@ -85,6 +85,11 @@ export async function cancelTaskRun(taskId: string, runId: string) {
   return response.run
 }
 
+export async function retryTaskRun(taskId: string, runId: string) {
+  const response = await http.post<{ run: TaskRun }>(`/tasks/${taskId}/runs/${runId}/retry`)
+  return response.run
+}
+
 export async function runScheduledTasks(executeCrawler = true) {
   return http.post<{
     ran_at: string
