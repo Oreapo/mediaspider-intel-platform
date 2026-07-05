@@ -157,6 +157,30 @@ class SQLiteAnalysisRepository(AnalysisRepository):
             connection.commit()
         return output
 
+    def delete_jobs_for_dataset(self, dataset_id: str) -> int:
+        normalized_dataset_id = dataset_id.strip()
+        if not normalized_dataset_id:
+            return 0
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id FROM analysis_jobs WHERE dataset_id = ?",
+                (normalized_dataset_id,),
+            ).fetchall()
+            job_ids = [str(row["id"]) for row in rows]
+            if not job_ids:
+                return 0
+            placeholders = ", ".join("?" for _ in job_ids)
+            connection.execute(
+                f"DELETE FROM analysis_outputs WHERE analysis_job_id IN ({placeholders})",
+                job_ids,
+            )
+            cursor = connection.execute(
+                f"DELETE FROM analysis_jobs WHERE id IN ({placeholders})",
+                job_ids,
+            )
+            connection.commit()
+            return cursor.rowcount
+
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(

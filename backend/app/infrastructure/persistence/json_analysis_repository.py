@@ -78,6 +78,20 @@ class JsonAnalysisRepository(AnalysisRepository):
         self._save_outputs(outputs)
         return output
 
+    def delete_jobs_for_dataset(self, dataset_id: str) -> int:
+        normalized_dataset_id = dataset_id.strip()
+        if not normalized_dataset_id:
+            return 0
+        jobs = self._load_jobs()
+        deleted_job_ids = {job.id for job in jobs if job.dataset_id == normalized_dataset_id}
+        if not deleted_job_ids:
+            return 0
+        self._save_jobs([job for job in jobs if job.id not in deleted_job_ids])
+        self._save_outputs(
+            [output for output in self._load_outputs() if output.analysis_job_id not in deleted_job_ids]
+        )
+        return len(deleted_job_ids)
+
     def _load_jobs(self) -> list[AnalysisJob]:
         if not self.jobs_file.exists():
             return []

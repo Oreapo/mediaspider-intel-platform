@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from ..api.schemas.platform import PlatformProfileCreateRequest, PlatformProfileUpdateRequest
@@ -60,12 +59,12 @@ class PlatformProfileService:
         warnings: list[str] = []
         if profile.auth_type in {AuthType.COOKIE, AuthType.STATE_FILE} and not profile.credentials_ref.strip():
             errors.append("credentials_ref is required for cookie/state_file authentication")
-        if profile.auth_type == AuthType.STATE_FILE and profile.credentials_ref:
-            state_path = Path(profile.credentials_ref).expanduser()
-            if not state_path.exists():
-                warnings.append("state_file does not exist on this machine")
+        if profile.auth_type == AuthType.STATE_FILE:
+            errors.append(
+                "state_file authentication is not supported by the MediaCrawler CLI; use cookie authentication"
+            )
         if profile.auth_type in {AuthType.QRCODE, AuthType.PHONE}:
-            warnings.append("interactive login is not yet automated; use cookie or state_file for scheduled runs")
+            warnings.append("interactive login is not automated; use cookie authentication for scheduled runs")
         return {
             "ready": not errors,
             "errors": errors,

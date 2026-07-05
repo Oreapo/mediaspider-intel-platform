@@ -151,6 +151,8 @@ def _platform_risk_rows(signals, datasets, entities, dataset_by_id, high_risk_le
                 "high_risk_signal_count": sum(
                     1 for signal in platform_signals if signal.risk_level.value in high_risk_levels
                 ),
+                "risk_levels": dict(Counter(signal.risk_level.value for signal in platform_signals)),
+                "signal_types": dict(Counter(signal.signal_type.value for signal in platform_signals)),
                 "entity_count": sum(1 for entity in entities if entity.platform.value == platform),
             }
         )

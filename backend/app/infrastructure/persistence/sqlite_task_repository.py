@@ -159,6 +159,14 @@ class SQLiteCollectionTaskRepository(CollectionTaskRepository):
 
     def delete_task(self, task_id: str) -> bool:
         with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT 1 FROM collection_tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if existing is None:
+                return False
+            connection.execute("DELETE FROM task_run_leases WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
             cursor = connection.execute("DELETE FROM collection_tasks WHERE id = ?", (task_id,))
             connection.commit()
             return cursor.rowcount > 0

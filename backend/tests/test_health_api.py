@@ -21,3 +21,14 @@ def test_health_check_reports_ok(path: str) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_root_path_points_users_to_frontend_and_docs() -> None:
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["frontend_url"] == "http://127.0.0.1:5200"
+    assert response.json()["docs_url"] == "/docs"

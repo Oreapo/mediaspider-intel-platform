@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if "pytest" not in sys.modules:
+    load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 from .api.dependencies import container
 from .api.routes import (
     analysis_router,
     auth_router,
     cases_router,
+    crawler_router,
     dashboard_router,
     datasets_router,
     entities_router,
@@ -24,6 +32,8 @@ from .api.routes import (
 )
 
 DEFAULT_CORS_ORIGINS = (
+    "http://127.0.0.1:5200",
+    "http://localhost:5200",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
     "http://127.0.0.1:4173",
@@ -74,10 +84,22 @@ app.include_router(analysis_router, prefix="/api")
 app.include_router(signals_router, prefix="/api")
 app.include_router(entities_router, prefix="/api")
 app.include_router(cases_router, prefix="/api")
+app.include_router(crawler_router, prefix="/api")
 app.include_router(evidence_router, prefix="/api")
 app.include_router(notifications_router, prefix="/api")
 app.include_router(logs_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return {
+        "name": "MediaSpider Intelligence Platform API",
+        "status": "ok",
+        "frontend_url": os.getenv("MEDIASPIDER_FRONTEND_URL", "http://127.0.0.1:5200"),
+        "docs_url": "/docs",
+        "health_url": "/health",
+    }
 
 
 @app.get("/health", include_in_schema=False)

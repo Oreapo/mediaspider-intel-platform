@@ -108,6 +108,8 @@ def test_sqlite_task_repository_task_crud_and_runs(tmp_path):
     assert repository.delete_task("tsk_second") is True
     assert repository.delete_task("missing") is False
     assert [item.id for item in repository.list_tasks()] == ["tsk_first"]
+    assert repository.get_run("run_second") is None
+    assert repository.count_runs() == 2
 
 
 def test_app_container_can_switch_task_repository_to_sqlite(tmp_path, monkeypatch):

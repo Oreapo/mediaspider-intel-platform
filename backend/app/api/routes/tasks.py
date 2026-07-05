@@ -4,10 +4,19 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from ..dependencies import OPERATOR_ROLES, READ_ROLES, get_audit_service, get_scheduler_service, get_task_service, require_roles
+from ..dependencies import (
+    OPERATOR_ROLES,
+    READ_ROLES,
+    get_audit_service,
+    get_platform_profile_service,
+    get_scheduler_service,
+    get_task_service,
+    require_roles,
+)
 from ..schemas.task import CollectionTaskCreateRequest, CollectionTaskUpdateRequest, ScheduledTaskRunRequest, TaskRunStartRequest
 from ...application.audit_service import AuditService
 from ...application.auth_service import AuthUser
+from ...application.platform_profile_service import PlatformProfileService
 from ...application.task_service import CollectionTaskService
 from ...application.scheduler_service import BackgroundScheduler
 from ...domain.models.platform import PlatformKey
@@ -54,9 +63,11 @@ def get_task(task_id: str, service: CollectionTaskService = Depends(get_task_ser
 def create_task(
     payload: CollectionTaskCreateRequest,
     service: CollectionTaskService = Depends(get_task_service),
+    profile_service: PlatformProfileService = Depends(get_platform_profile_service),
     audit_service: AuditService = Depends(get_audit_service),
     actor: AuthUser = Depends(require_roles(*OPERATOR_ROLES)),
 ):
+    _validate_auth_profile(payload.auth_profile_id, payload.platform, profile_service)
     task = service.create_task(payload)
     audit_service.record(
         action="task.create",
@@ -138,9 +149,23 @@ def update_task(
     task_id: str,
     payload: CollectionTaskUpdateRequest,
     service: CollectionTaskService = Depends(get_task_service),
+    profile_service: PlatformProfileService = Depends(get_platform_profile_service),
     audit_service: AuditService = Depends(get_audit_service),
     actor: AuthUser = Depends(require_roles(*OPERATOR_ROLES)),
 ):
+    existing = service.get_task(task_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    effective_profile_id = (
+        payload.auth_profile_id
+        if "auth_profile_id" in payload.model_fields_set
+        else existing.auth_profile_id
+    )
+    _validate_auth_profile(
+        effective_profile_id,
+        payload.platform or existing.platform,
+        profile_service,
+    )
     try:
         task = service.update_task(task_id, payload)
     except ValueError as exc:
@@ -156,6 +181,28 @@ def update_task(
     return {"message": "Task updated", "task": task.model_dump(mode="json")}
 
 
+def _validate_auth_profile(
+    profile_id: str | None,
+    platform: PlatformKey,
+    service: PlatformProfileService,
+) -> None:
+    if not profile_id:
+        return
+    profile = service.get_profile(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=400, detail="Authentication profile not found")
+    if profile.platform != platform:
+        raise HTTPException(
+            status_code=400,
+            detail="Authentication profile platform does not match task platform",
+        )
+    if profile.auth_type.value == "state_file":
+        raise HTTPException(
+            status_code=400,
+            detail="state_file authentication is not supported by the MediaCrawler CLI; use cookie authentication",
+        )
+
+
 @router.delete("/{task_id}", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])
 def delete_task(
     task_id: str,
@@ -164,7 +211,10 @@ def delete_task(
     actor: AuthUser = Depends(require_roles(*OPERATOR_ROLES)),
 ):
     task = service.get_task(task_id)
-    deleted = service.delete_task(task_id)
+    try:
+        deleted = service.delete_task(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Task not found")
     audit_service.record(
@@ -287,6 +337,48 @@ def cancel_task_run(
         },
     )
     return {"message": "Task run cancelled", "run": run.model_dump(mode="json")}
+
+
+@router.post(
+    "/{task_id}/runs/{run_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_roles(*OPERATOR_ROLES))],
+)
+def retry_task_run(
+    task_id: str,
+    run_id: str,
+    service: CollectionTaskService = Depends(get_task_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    actor: AuthUser = Depends(require_roles(*OPERATOR_ROLES)),
+):
+    try:
+        run = service.retry_run(task_id, run_id)
+    except ValueError as exc:
+        detail = str(exc)
+        lowered_detail = detail.lower()
+        conflict_phrases = ("already has active run", "can be retried", "before retry")
+        if "not found" in lowered_detail:
+            status_code = 404
+        elif any(phrase in lowered_detail for phrase in conflict_phrases):
+            status_code = 409
+        else:
+            status_code = 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    audit_service.record(
+        action="task.run_retry",
+        actor=actor,
+        target_type="task_run",
+        target_id=run.id,
+        summary=f"重试采集任务运行：{run_id}",
+        metadata_json={
+            "task_id": task_id,
+            "retry_of_run_id": run_id,
+            "retry_root_run_id": run.run_result_json.get("retry_root_run_id"),
+            "retry_attempt": run.run_result_json.get("retry_attempt"),
+            "status": run.status.value,
+        },
+    )
+    return {"message": "Task run retry accepted", "run": run.model_dump(mode="json")}
 
 
 @router.post("/{task_id}/runs", dependencies=[Depends(require_roles(*OPERATOR_ROLES))])

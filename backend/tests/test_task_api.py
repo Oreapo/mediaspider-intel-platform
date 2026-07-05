@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import sqlite3
 import time
@@ -32,7 +33,7 @@ class FakeCrawlerRunner:
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / f"{task.task_mode.value}_contents_2026-04-30.jsonl"
         output_file.write_text(
-            '{"note_id":"n1","title":"risk title","source_keyword":"春日穿搭"}\n'
+            '{"note_id":"n1","title":"兼职 risk title","source_keyword":"春日穿搭"}\n'
             '{"note_id":"n2","title":"another title","source_keyword":"春日穿搭"}\n',
             encoding="utf-8",
         )
@@ -47,18 +48,26 @@ class FakeCrawlerRunner:
 
 
 class FailingCrawlerRunner:
-    def __init__(self, root: Path):
+    def __init__(
+        self,
+        root: Path,
+        *,
+        error_message: str = "simulated crawler failure",
+        return_code: int = 1,
+    ):
         self.root = root
+        self.error_message = error_message
+        self.return_code = return_code
 
     def run(self, task, run):
         log_path = self.root / "storage" / "fake_crawler_output" / f"{run.id}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("crawler failed\n", encoding="utf-8")
         return CrawlerRunResult(
-            return_code=1,
+            return_code=self.return_code,
             log_path=log_path,
             output_files=[],
-            error_message="simulated crawler failure",
+            error_message=self.error_message,
             redacted_command=["uv", "run", "python", "main.py"],
         )
 
@@ -162,6 +171,9 @@ def wait_for_task_run(
     latest: dict = {}
     while time.monotonic() < deadline:
         response = client.get(f"/api/tasks/{task_id}/runs/{run_id}")
+        if response.status_code == 404:
+            time.sleep(0.01)
+            continue
         assert response.status_code == 200
         latest = response.json()["run"]
         if not terminal or latest["status"] in {"succeeded", "failed", "cancelled"}:
@@ -176,6 +188,15 @@ def test_platform_models_expose_xianyu():
 
     assert response.status_code == 200
     payload = response.json()
+    xhs = next(item for item in payload if item["platform"] == "xhs")
+    xhs_field_keys = {field["key"] for field in xhs["task_fields"]}
+    assert {
+        "login_type",
+        "save_option",
+        "max_comments_count_singlenotes",
+        "max_concurrency_num",
+        "signal_extractors",
+    }.issubset(xhs_field_keys)
     assert any(item["platform"] == "xianyu" for item in payload)
     xianyu = next(item for item in payload if item["platform"] == "xianyu")
     assert "seller_template_reuse" in xianyu["supported_signal_extractors"]
@@ -198,7 +219,10 @@ def test_task_crud_flow(tmp_path):
             "filter_payload_json": {"start_page": 1},
             "runtime_payload_json": {"enable_comments": True},
             "storage_profile_json": {"save_option": "jsonl"},
-            "analysis_profile_json": {"analysis_types": ["content_structure"]},
+            "analysis_profile_json": {
+                "signal_extractors": ["risk_terms"],
+                "analysis_types": ["content_structure"],
+            },
             "notes": "task from test",
         }
 
@@ -236,11 +260,33 @@ def test_task_crud_flow(tmp_path):
         assert observed_import_progress[0]["percent"] == 80
         assert run["task_snapshot_json"]["scenario_type"] == "lead_diversion"
         assert len(run["result_dataset_ids"]) == 1
+        assert len(run["run_result_json"]["signal_ids"]) == 1
+        assert run["run_result_json"]["signal_failures"] == []
+        extracted_signals = client.get(
+            "/api/signals",
+            params={"dataset_id": run["result_dataset_id"]},
+        ).json()["signals"]
+        assert len(extracted_signals) == 1
+        assert extracted_signals[0]["task_run_id"] == run["id"]
+        assert extracted_signals[0]["signal_type"] == "risk_term_hit"
+        assert len(run["run_result_json"]["analysis_job_ids"]) == 1
+        assert run["run_result_json"]["analysis_failures"] == []
+        first_analysis_jobs = client.get(
+            "/api/analysis/jobs",
+            params={"dataset_id": run["result_dataset_id"]},
+        ).json()["jobs"]
+        assert len(first_analysis_jobs) == 1
+        assert first_analysis_jobs[0]["analysis_scope"] == "platform"
+        assert first_analysis_jobs[0]["analysis_type"] == "content_structure"
+        assert first_analysis_jobs[0]["status"] == "succeeded"
 
         second_run_response = client.post(f"/api/tasks/{task['id']}/runs")
         assert second_run_response.status_code == 202
         second_submitted_run = second_run_response.json()["run"]
         second_run = wait_for_task_run(client, task["id"], second_submitted_run["id"])
+        assert len(second_run["run_result_json"]["signal_ids"]) == 1
+        assert len(second_run["run_result_json"]["analysis_job_ids"]) == 1
+        assert client.get("/api/analysis/jobs").json()["total"] == 2
 
         runs_response = client.get(
             f"/api/tasks/{task['id']}/runs",
@@ -278,6 +324,12 @@ def test_task_crud_flow(tmp_path):
 
         delete_response = client.delete(f"/api/tasks/{task['id']}")
         assert delete_response.status_code == 200
+        assert client.get(f"/api/tasks/{task['id']}").status_code == 404
+        assert client.get(f"/api/logs/runs/{run['id']}").status_code == 404
+        assert all(
+            item["run"]["task_id"] != task["id"]
+            for item in client.get("/api/logs/runs").json()["logs"]
+        )
     finally:
         set_container(original_container)
 
@@ -543,6 +595,9 @@ def test_crawler_diagnostics_reports_ready_command_and_validation_errors(tmp_pat
         diagnostics = valid_response.json()["diagnostics"]
         assert diagnostics["ready"] is True
         assert "--platform" in diagnostics["command"]
+        assert diagnostics["command"][diagnostics["command"].index("--lt") + 1] == "cookie"
+        save_data_path = diagnostics["command"][diagnostics["command"].index("--save_data_path") + 1]
+        assert Path(save_data_path).is_absolute()
         assert "<redacted>" in diagnostics["command"]
         assert diagnostics["raw_command"] == []
 
@@ -563,6 +618,117 @@ def test_crawler_diagnostics_reports_ready_command_and_validation_errors(tmp_pat
         assert "no MediaCrawler entrypoint" in invalid_response.json()["diagnostics"]["errors"][0]
     finally:
         set_container(original_container)
+
+
+def test_crawler_diagnostics_reports_unconfigured_media_crawler_root(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEDIASPIDER_MEDIA_CRAWLER_ROOT", raising=False)
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        task = client.post(
+            "/api/tasks",
+            json={
+                "task_name": "Unconfigured crawler",
+                "platform": "xhs",
+                "entity_type": "content",
+                "task_mode": "search",
+                "scenario_type": "lead_diversion",
+                "task_payload_json": {"keywords": ["test"]},
+            },
+        ).json()["task"]
+
+        response = client.get(f"/api/tasks/{task['id']}/crawler-diagnostics")
+
+        assert response.status_code == 200
+        diagnostics = response.json()["diagnostics"]
+        assert diagnostics["ready"] is False
+        assert diagnostics["media_crawler_root"] == ""
+        assert diagnostics["errors"] == [
+            "MediaCrawler root is not configured. Set MEDIASPIDER_MEDIA_CRAWLER_ROOT to an authorized MediaCrawler checkout."
+        ]
+    finally:
+        set_container(original_container)
+
+
+def test_crawler_diagnostics_reports_missing_runtime_before_run(tmp_path, monkeypatch):
+    media_root = tmp_path / "MediaCrawler"
+    media_root.mkdir()
+    (media_root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.setattr("app.application.crawler_runner.shutil.which", lambda _: None)
+    runner = MediaCrawlerProcessRunner(
+        media_crawler_root=media_root,
+        storage_root=tmp_path / "storage",
+    )
+    task = CollectionTask(
+        task_name="Missing crawler runtime",
+        platform="xhs",
+        entity_type="content",
+        task_mode="search",
+        scenario_type="lead_diversion",
+        task_payload_json={"keywords": ["runtime"]},
+    )
+
+    diagnostics = runner.diagnose(task)
+
+    assert diagnostics["ready"] is False
+    assert any("runtime is unavailable" in error for error in diagnostics["errors"])
+
+
+def test_crawler_diagnostics_rejects_headless_interactive_login(tmp_path):
+    media_root = tmp_path / "MediaCrawler"
+    media_root.mkdir()
+    (media_root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    runner = MediaCrawlerProcessRunner(
+        media_crawler_root=media_root,
+        storage_root=tmp_path / "storage",
+        command_prefix=["python", "main.py"],
+    )
+    task = CollectionTask(
+        task_name="Invisible QR login",
+        platform="xhs",
+        entity_type="content",
+        task_mode="search",
+        scenario_type="lead_diversion",
+        task_payload_json={"keywords": ["login"]},
+        runtime_payload_json={"login_type": "qrcode", "headless": True},
+    )
+
+    diagnostics = runner.diagnose(task)
+
+    assert diagnostics["ready"] is False
+    assert any("requires headless=false" in error for error in diagnostics["errors"])
+
+
+def test_crawler_runner_uses_media_crawler_virtualenv_when_available(tmp_path, monkeypatch):
+    media_root = tmp_path / "MediaCrawler"
+    media_root.mkdir()
+    (media_root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    scripts_dir = ".venv/Scripts" if os.name == "nt" else ".venv/bin"
+    executable_name = "python.exe" if os.name == "nt" else "python"
+    venv_python = media_root / scripts_dir / executable_name
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+    monkeypatch.setattr("app.application.crawler_runner.shutil.which", lambda _: None)
+    runner = MediaCrawlerProcessRunner(
+        media_crawler_root=media_root,
+        storage_root=tmp_path / "storage",
+    )
+    task = CollectionTask(
+        task_name="Crawler virtualenv",
+        platform="xhs",
+        entity_type="content",
+        task_mode="search",
+        scenario_type="lead_diversion",
+        task_payload_json={"keywords": ["runtime"]},
+    )
+
+    diagnostics = runner.diagnose(task)
+
+    assert diagnostics["ready"] is True
+    assert diagnostics["command"][0] == str(venv_python)
+    assert Path(diagnostics["command"][1]).name == "run_mediacrawler.py"
 
 
 def test_scheduled_preflight_has_no_run_or_schedule_side_effects(tmp_path):
@@ -798,6 +964,12 @@ def test_container_recovers_interrupted_task_runs(tmp_path, monkeypatch, reposit
     [
         ("MediaCrawler timed out after 30 seconds", 124, "timeout", True),
         ("Cookie login expired", 1, "authentication", False),
+        (
+            "MediaCrawler root is not configured. Set MEDIASPIDER_MEDIA_CRAWLER_ROOT to an authorized MediaCrawler checkout.",
+            None,
+            "configuration",
+            False,
+        ),
         ("MediaCrawler root not found: C:/missing", None, "configuration", False),
         ("Proxy connection failed", 1, "network", True),
         ("Dataset storage permission denied", None, "storage", False),
@@ -825,6 +997,138 @@ def test_task_failure_diagnosis_classifies_common_errors(
     assert diagnosis["retryable"] is expected_retryable
     assert diagnosis["suggestions"]
     assert diagnosis["return_code"] == return_code
+
+
+@pytest.mark.parametrize("repository_kind", ["json", "sqlite"])
+def test_failed_task_run_can_be_retried_with_traceable_chain(
+    tmp_path,
+    monkeypatch,
+    repository_kind,
+):
+    storage_dir = tmp_path / repository_kind
+    monkeypatch.setenv("MEDIASPIDER_STORAGE_DIR", str(storage_dir))
+    monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", str(storage_dir / "platform.sqlite3"))
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", repository_kind)
+    test_container = AppContainer(
+        tmp_path,
+        crawler_runner=FailingCrawlerRunner(tmp_path),
+    )
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        task = client.post(
+            "/api/tasks",
+            json={
+                "task_name": "Retryable failure task",
+                "platform": "xhs",
+                "entity_type": "content",
+                "task_mode": "search",
+                "scenario_type": "lead_diversion",
+                "task_payload_json": {"keywords": ["retry"]},
+            },
+        ).json()["task"]
+
+        submitted = client.post(f"/api/tasks/{task['id']}/runs").json()["run"]
+        failed = wait_for_task_run(client, task["id"], submitted["id"])
+        assert failed["status"] == "failed"
+        assert failed["run_result_json"]["failure_diagnosis"]["retryable"] is True
+
+        first_retry_response = client.post(
+            f"/api/tasks/{task['id']}/runs/{failed['id']}/retry"
+        )
+        assert first_retry_response.status_code == 202
+        first_retry = first_retry_response.json()["run"]
+        assert first_retry["trigger_type"] == "manual_retry"
+        assert first_retry["run_result_json"]["retry_of_run_id"] == failed["id"]
+        assert first_retry["run_result_json"]["retry_root_run_id"] == failed["id"]
+        assert first_retry["run_result_json"]["retry_attempt"] == 1
+
+        first_retry = wait_for_task_run(client, task["id"], first_retry["id"])
+        second_retry_response = client.post(
+            f"/api/tasks/{task['id']}/runs/{failed['id']}/retry"
+        )
+        assert second_retry_response.status_code == 202
+        second_retry = second_retry_response.json()["run"]
+        assert second_retry["run_result_json"]["retry_of_run_id"] == failed["id"]
+        assert second_retry["run_result_json"]["retry_root_run_id"] == failed["id"]
+        assert second_retry["run_result_json"]["retry_attempt"] == 2
+        wait_for_task_run(client, task["id"], second_retry["id"])
+
+        audit_response = client.get(
+            "/api/logs/audit",
+            params={"action": "task.run_retry"},
+        )
+        assert audit_response.status_code == 200
+        retry_events = audit_response.json()["events"]
+        assert len(retry_events) == 2
+        assert retry_events[0]["metadata_json"]["retry_attempt"] == 2
+        assert retry_events[0]["metadata_json"]["retry_root_run_id"] == failed["id"]
+    finally:
+        set_container(original_container)
+
+
+def test_failed_task_run_retry_rejects_non_retryable_diagnosis(tmp_path):
+    test_container = AppContainer(
+        tmp_path,
+        crawler_runner=FailingCrawlerRunner(
+            tmp_path,
+            error_message="Cookie login expired",
+        ),
+    )
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        task = client.post(
+            "/api/tasks",
+            json={
+                "task_name": "Authentication failure task",
+                "platform": "xhs",
+                "entity_type": "content",
+                "task_mode": "search",
+                "scenario_type": "lead_diversion",
+                "task_payload_json": {"keywords": ["auth"]},
+            },
+        ).json()["task"]
+        submitted = client.post(f"/api/tasks/{task['id']}/runs").json()["run"]
+        failed = wait_for_task_run(client, task["id"], submitted["id"])
+        diagnosis = failed["run_result_json"]["failure_diagnosis"]
+        assert diagnosis["code"] == "authentication"
+        assert diagnosis["retryable"] is False
+
+        response = client.post(f"/api/tasks/{task['id']}/runs/{failed['id']}/retry")
+
+        assert response.status_code == 409
+        assert "before retry" in response.json()["detail"]
+    finally:
+        set_container(original_container)
+
+
+def test_retry_run_not_found_returns_404(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        response = client.post("/api/tasks/task_missing/runs/run_missing/retry")
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+    finally:
+        set_container(original_container)
+
+
+def test_cancel_run_not_found_returns_404(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        response = client.post("/api/tasks/task_missing/runs/run_missing/cancel")
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+    finally:
+        set_container(original_container)
 
 
 def test_task_runs_share_global_capacity_and_reject_duplicate_manual_run(tmp_path, monkeypatch):
@@ -1150,6 +1454,38 @@ def test_media_crawler_process_runner_terminates_running_process(tmp_path):
     assert result.error_message == "MediaCrawler run cancelled"
     assert "cancelled=true" in result.log_path.read_text(encoding="utf-8")
     assert runner.cancel(run.id) is False
+
+
+def test_media_crawler_process_runner_classifies_authentication_failure(tmp_path):
+    media_root = tmp_path / "MediaCrawler"
+    media_root.mkdir()
+    (media_root / "main.py").write_text("print('placeholder')\n", encoding="utf-8")
+    runner = MediaCrawlerProcessRunner(
+        media_crawler_root=media_root,
+        storage_root=tmp_path / "storage",
+        command_prefix=[
+            sys.executable,
+            "-c",
+            "print('DataFetchError: invalid cookie'); raise SystemExit(1)",
+        ],
+    )
+    task = CollectionTask(
+        task_name="Invalid crawler auth",
+        platform="xhs",
+        entity_type="content",
+        task_mode="search",
+        scenario_type="lead_diversion",
+        task_payload_json={"keywords": ["auth"]},
+    )
+    run = TaskRun(task_id=task.id, status="running")
+
+    result = runner.run(task, run)
+
+    assert result.return_code == 1
+    assert result.error_message == (
+        "MediaCrawler authentication failed: login state or cookies are invalid"
+    )
+    assert "invalid cookie" in result.log_path.read_text(encoding="utf-8")
 
 
 def test_media_crawler_process_runner_accepts_cancellation_during_startup(tmp_path):

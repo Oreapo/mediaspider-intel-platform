@@ -127,9 +127,14 @@ def test_task_run_applies_platform_auth_profile(tmp_path):
         submitted = run_response.json()["run"]
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
-            run = client.get(
+            run_lookup = client.get(
                 f"/api/tasks/{task['id']}/runs/{submitted['id']}"
-            ).json()["run"]
+            )
+            if run_lookup.status_code == 404:
+                time.sleep(0.01)
+                continue
+            assert run_lookup.status_code == 200
+            run = run_lookup.json()["run"]
             if run["status"] in {"succeeded", "failed", "cancelled"}:
                 break
             time.sleep(0.01)
@@ -138,5 +143,68 @@ def test_task_run_applies_platform_auth_profile(tmp_path):
         assert run["status"] == "succeeded"
         assert run["task_snapshot_json"]["runtime_payload_json"]["auth_profile_id"] == profile["id"]
         assert runner.last_runtime_payload["max_concurrency_num"] == 3
+    finally:
+        set_container(original_container)
+
+
+def test_task_rejects_missing_or_cross_platform_auth_profile(tmp_path):
+    test_container = AppContainer(tmp_path, crawler_runner=InspectingCrawlerRunner())
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        profile = client.post(
+            "/api/platforms/profiles",
+            json={
+                "platform": "xhs",
+                "profile_name": "XHS Cookie",
+                "auth_type": "cookie",
+                "credentials_ref": "cookie-value",
+            },
+        ).json()["profile"]
+        task_payload = {
+            "task_name": "Profile Validation Task",
+            "platform": "dy",
+            "entity_type": "content",
+            "task_mode": "search",
+            "scenario_type": "lead_diversion",
+            "task_payload_json": {"keywords": ["test"]},
+        }
+
+        missing_response = client.post(
+            "/api/tasks",
+            json={**task_payload, "auth_profile_id": "pf_missing"},
+        )
+        assert missing_response.status_code == 400
+        assert missing_response.json()["detail"] == "Authentication profile not found"
+
+        mismatch_response = client.post(
+            "/api/tasks",
+            json={**task_payload, "auth_profile_id": profile["id"]},
+        )
+        assert mismatch_response.status_code == 400
+        assert "does not match" in mismatch_response.json()["detail"]
+
+        state_profile = client.post(
+            "/api/platforms/profiles",
+            json={
+                "platform": "dy",
+                "profile_name": "Legacy Browser State",
+                "auth_type": "state_file",
+                "credentials_ref": "browser-state.json",
+            },
+        ).json()["profile"]
+        state_diagnostics = client.get(
+            f"/api/platforms/profiles/{state_profile['id']}/diagnostics"
+        ).json()["diagnostics"]
+        assert state_diagnostics["ready"] is False
+        assert any("not supported" in error for error in state_diagnostics["errors"])
+
+        unsupported_response = client.post(
+            "/api/tasks",
+            json={**task_payload, "auth_profile_id": state_profile["id"]},
+        )
+        assert unsupported_response.status_code == 400
+        assert "not supported" in unsupported_response.json()["detail"]
     finally:
         set_container(original_container)

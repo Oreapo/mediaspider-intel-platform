@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 
 from ...application.analysis_service import AnalysisService
@@ -49,8 +50,12 @@ class AppContainer:
         crawler_runner: CrawlerRunner | None = None,
         media_crawler_root: Path | None = None,
     ):
-        self.root_dir = root_dir
-        self.storage_dir = Path(os.getenv("MEDIASPIDER_STORAGE_DIR", str(root_dir / "storage")))
+        self.root_dir = root_dir.resolve()
+        self.project_dir = self.root_dir.parent if self.root_dir.name == "backend" else self.root_dir
+        self.storage_dir = self._resolve_config_path(
+            "MEDIASPIDER_STORAGE_DIR",
+            self.root_dir / "storage",
+        )
         self._task_repository = self._build_task_repository()
         self._dataset_repository = self._build_dataset_repository()
         self._analysis_repository = self._build_analysis_repository()
@@ -72,6 +77,7 @@ class AppContainer:
         self._crawler_runner = crawler_runner or MediaCrawlerProcessRunner(
             media_crawler_root=media_crawler_root or self._default_media_crawler_root(),
             storage_root=self.storage_dir,
+            command_prefix=self._default_media_crawler_command_prefix(),
         )
         self._task_service = CollectionTaskService(
             self._task_repository,
@@ -91,10 +97,12 @@ class AppContainer:
             self._analysis_repository,
             self._dataset_service,
         )
+        self._task_service.set_analysis_job_creator(self._analysis_service.create_job)
         self._signal_service = SignalService(
             self._signal_repository,
             self._dataset_service,
         )
+        self._task_service.set_signal_extractor(self._signal_service.extract_from_dataset)
         self._entity_service = EntityService(
             self._entity_repository,
             self._signal_service,
@@ -189,13 +197,25 @@ class AppContainer:
     def scheduler_service(self) -> BackgroundScheduler:
         return self._scheduler_service
 
-    def _default_media_crawler_root(self) -> Path:
+    def _default_media_crawler_root(self) -> Path | None:
         configured_root = os.getenv("MEDIASPIDER_MEDIA_CRAWLER_ROOT")
         if configured_root:
-            return Path(configured_root)
+            return Path(configured_root).expanduser().resolve()
         if self.root_dir.name == "mediaspider-intel-platform" and self.root_dir.parent.name == "products":
             return self.root_dir.parent.parent
-        return self.root_dir
+        candidate = self.root_dir.parent / "MediaCrawler"
+        if (candidate / "main.py").exists():
+            return candidate
+        return None
+
+    def _default_media_crawler_command_prefix(self) -> list[str] | None:
+        configured_command = os.getenv("MEDIASPIDER_MEDIA_CRAWLER_COMMAND", "").strip()
+        if not configured_command:
+            return None
+        command = shlex.split(configured_command, posix=os.name != "nt")
+        if not command:
+            raise ValueError("MEDIASPIDER_MEDIA_CRAWLER_COMMAND must not be empty")
+        return command
 
     def _uses_sqlite(self, repository_name: str) -> bool:
         repository_mode = os.getenv("MEDIASPIDER_REPOSITORY_MODE", "").lower()
@@ -204,12 +224,17 @@ class AppContainer:
         return os.getenv(repository_name, "").lower() == "sqlite"
 
     def _sqlite_path(self) -> Path:
-        return Path(
-            os.getenv(
-                "MEDIASPIDER_SQLITE_PATH",
-                str(self.storage_dir / "mediaspider-intel.sqlite3"),
-            )
+        return self._resolve_config_path(
+            "MEDIASPIDER_SQLITE_PATH",
+            self.storage_dir / "mediaspider-intel.sqlite3",
         )
+
+    def _resolve_config_path(self, env_name: str, default: Path) -> Path:
+        configured = os.getenv(env_name)
+        path = Path(configured).expanduser() if configured else Path(default)
+        if not path.is_absolute():
+            path = self.project_dir / path
+        return path.resolve()
 
     def _build_dataset_repository(self):
         if self._uses_sqlite("MEDIASPIDER_DATASET_REPOSITORY"):

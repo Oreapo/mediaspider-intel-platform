@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 from dataclasses import dataclass, field
@@ -9,10 +10,19 @@ from pathlib import Path
 from threading import RLock
 from typing import Protocol
 
+from ..domain.models.platform import AuthType, PlatformKey
 from ..domain.models.task import CollectionTask, TaskMode, TaskRun
 
 
-SUPPORTED_CRAWLER_PLATFORMS = {"xhs", "dy", "ks", "bili", "wb", "tieba", "zhihu"}
+# Every platform except xianyu can drive the external MediaCrawler CLI; xianyu is
+# allowed as a profile but has no CLI collection path.
+SUPPORTED_CRAWLER_PLATFORMS = {
+    platform.value for platform in PlatformKey if platform != PlatformKey.XIANYU
+}
+# state_file profiles are not supported for new MediaCrawler CLI runs.
+SUPPORTED_CRAWLER_LOGIN_TYPES = {
+    auth_type.value for auth_type in AuthType if auth_type != AuthType.STATE_FILE
+}
 SUPPORTED_FILE_SAVE_OPTIONS = {"jsonl", "json", "csv"}
 OUTPUT_EXTENSIONS = {".jsonl", ".json", ".csv"}
 
@@ -41,13 +51,13 @@ class MediaCrawlerProcessRunner:
     def __init__(
         self,
         *,
-        media_crawler_root: Path,
+        media_crawler_root: Path | None,
         storage_root: Path,
         command_prefix: list[str] | None = None,
     ):
-        self.media_crawler_root = media_crawler_root
-        self.storage_root = storage_root
-        self.command_prefix = command_prefix or ["uv", "run", "python", "main.py"]
+        self.media_crawler_root = media_crawler_root.expanduser().resolve() if media_crawler_root else None
+        self.storage_root = storage_root.expanduser().resolve()
+        self.command_prefix = list(command_prefix) if command_prefix else None
         self._process_lock = RLock()
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._active_run_ids: set[str] = set()
@@ -114,7 +124,7 @@ class MediaCrawlerProcessRunner:
                 if cancelled:
                     error_message = "MediaCrawler run cancelled"
                 elif return_code != 0:
-                    error_message = f"MediaCrawler exited with code {return_code}"
+                    error_message = self._process_error_message(return_code, stdout or "")
                 finished_at = datetime.utcnow()
                 with log_path.open("a", encoding="utf-8") as handle:
                     handle.write(stdout or "")
@@ -227,24 +237,42 @@ class MediaCrawlerProcessRunner:
         warnings: list[str] = []
         command: list[str] = []
         redacted_command: list[str] = []
+        login_type: str | None = None
 
-        if not (self.media_crawler_root / "main.py").exists():
+        root_ready = True
+        if self.media_crawler_root is None:
+            root_ready = False
+            errors.append("MediaCrawler root is not configured. Set MEDIASPIDER_MEDIA_CRAWLER_ROOT to an authorized MediaCrawler checkout.")
+        elif not (self.media_crawler_root / "main.py").exists():
+            root_ready = False
             errors.append(f"MediaCrawler root not found: {self.media_crawler_root}")
-        try:
-            command, redacted_command = self._build_command(task, output_root)
-        except ValueError as exc:
-            errors.append(str(exc))
+        if root_ready:
+            try:
+                command, redacted_command = self._build_command(task, output_root)
+                login_type = self._resolve_login_type(task)
+            except ValueError as exc:
+                errors.append(str(exc))
 
         if task.runtime_payload_json.get("cookies"):
             warnings.append("cookies are configured and will be redacted from diagnostics")
         if task.runtime_payload_json.get("state_file"):
             warnings.append("state_file is configured on the profile; MediaCrawler CLI cookie support is used when cookies are present")
-        if not task.runtime_payload_json.get("headless", False):
+        headless = self._bool_string(task.runtime_payload_json.get("headless", False)) == "true"
+        if login_type in {"qrcode", "phone"} and headless:
+            errors.append(
+                f"{login_type} login requires headless=false so the interactive browser is visible"
+            )
+        elif login_type in {"qrcode", "phone"}:
+            warnings.append(
+                f"{login_type} login requires user interaction in the launched browser; "
+                "use a cookie profile for unattended runs"
+            )
+        elif not headless:
             warnings.append("headless is disabled; server environments may require a visible browser session")
 
         return {
             "ready": not errors,
-            "media_crawler_root": str(self.media_crawler_root),
+            "media_crawler_root": str(self.media_crawler_root) if self.media_crawler_root else "",
             "output_root": str(output_root),
             "log_path": str(log_path),
             "command": redacted_command,
@@ -254,6 +282,8 @@ class MediaCrawlerProcessRunner:
         }
 
     def _validate_root(self) -> None:
+        if self.media_crawler_root is None:
+            raise ValueError("MediaCrawler root is not configured. Set MEDIASPIDER_MEDIA_CRAWLER_ROOT to an authorized MediaCrawler checkout.")
         if not (self.media_crawler_root / "main.py").exists():
             raise ValueError(f"MediaCrawler root not found: {self.media_crawler_root}")
 
@@ -263,14 +293,18 @@ class MediaCrawlerProcessRunner:
             raise ValueError(f"Platform {platform} has no MediaCrawler entrypoint yet")
 
         crawler_type = self._resolve_crawler_type(task)
+        login_type = self._resolve_login_type(task)
         save_option = str(task.storage_profile_json.get("save_option") or "jsonl").lower()
         if save_option not in SUPPORTED_FILE_SAVE_OPTIONS:
             raise ValueError(f"Task storage save_option must be one of {sorted(SUPPORTED_FILE_SAVE_OPTIONS)}")
 
+        resolved_output_root = output_root.expanduser().resolve()
         command = [
-            *self.command_prefix,
+            *self._resolve_command_prefix(),
             "--platform",
             platform,
+            "--lt",
+            login_type,
             "--type",
             crawler_type,
             "--start",
@@ -278,7 +312,7 @@ class MediaCrawlerProcessRunner:
             "--save_data_option",
             save_option,
             "--save_data_path",
-            str(output_root),
+            str(resolved_output_root),
             "--get_comment",
             self._bool_string(task.runtime_payload_json.get("enable_comments", True)),
             "--get_sub_comment",
@@ -323,6 +357,26 @@ class MediaCrawlerProcessRunner:
             redacted_command.extend(["--cookies", "<redacted>"])
         return command, redacted_command
 
+    def _resolve_command_prefix(self) -> list[str]:
+        if self.command_prefix:
+            return list(self.command_prefix)
+        launcher_path = Path(__file__).resolve().parents[2] / "scripts" / "run_mediacrawler.py"
+        if self.media_crawler_root is not None:
+            venv_python = (
+                self.media_crawler_root / ".venv" / ("Scripts" if os.name == "nt" else "bin") / (
+                    "python.exe" if os.name == "nt" else "python"
+                )
+            )
+            if venv_python.is_file():
+                return [str(venv_python), str(launcher_path)]
+        uv_executable = shutil.which("uv")
+        if uv_executable:
+            return [uv_executable, "run", "python", str(launcher_path)]
+        raise ValueError(
+            "MediaCrawler runtime is unavailable: install uv or create "
+            "<MediaCrawler>/.venv with the crawler dependencies"
+        )
+
     def _resolve_crawler_type(self, task: CollectionTask) -> str:
         if task.task_mode != TaskMode.MONITOR:
             return task.task_mode.value
@@ -330,6 +384,19 @@ class MediaCrawlerProcessRunner:
         if configured not in {"search", "detail", "creator"}:
             raise ValueError("monitor task runs require runtime_payload_json.crawler_type to be search, detail, or creator")
         return str(configured)
+
+    def _resolve_login_type(self, task: CollectionTask) -> str:
+        configured = task.runtime_payload_json.get("login_type") or task.runtime_payload_json.get("lt")
+        if configured is None and task.runtime_payload_json.get("cookies"):
+            return "cookie"
+        if configured is None:
+            configured = "qrcode"
+        login_type = str(configured).lower()
+        if login_type not in SUPPORTED_CRAWLER_LOGIN_TYPES:
+            raise ValueError("runtime_payload_json.login_type must be qrcode, phone, or cookie")
+        if login_type == "cookie" and not task.runtime_payload_json.get("cookies"):
+            raise ValueError("cookie login requires runtime_payload_json.cookies or an auth profile with cookies")
+        return login_type
 
     def _discover_output_files(self, output_root: Path) -> list[Path]:
         if not output_root.exists():
@@ -352,6 +419,26 @@ class MediaCrawlerProcessRunner:
         if isinstance(value, str):
             return "true" if value.lower() in {"1", "true", "yes", "y"} else "false"
         return "true" if bool(value) else "false"
+
+    def _process_error_message(self, return_code: int, output: str) -> str:
+        normalized = output.lower()
+        if any(
+            marker in normalized
+            for marker in (
+                "无登录信息",
+                "登录信息为空",
+                "cookie is invalid",
+                "invalid cookie",
+                "authentication failed",
+                "login required",
+            )
+        ):
+            return "MediaCrawler authentication failed: login state or cookies are invalid"
+        if "executable doesn't exist" in normalized and "playwright" in normalized:
+            return "MediaCrawler browser runtime is unavailable; install the Playwright browser"
+        if "modulenotfounderror" in normalized:
+            return "MediaCrawler Python dependencies are incomplete; inspect the run log"
+        return f"MediaCrawler exited with code {return_code}"
 
     def _positive_int(self, value: object, default: int, minimum: int) -> int:
         try:

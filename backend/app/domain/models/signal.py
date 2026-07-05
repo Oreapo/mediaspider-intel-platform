@@ -10,6 +10,9 @@ from .base import TimestampedModel, generate_id
 
 class SignalType(str, Enum):
     RISK_TERM_HIT = "risk_term_hit"
+    RECRUIT_PATTERN_HIT = "recruit_pattern_hit"
+    SERVICE_OFFER_HIT = "service_offer_hit"
+    TRAFFIC_ROUTE_HIT = "traffic_route_hit"
     CONTACT_POINT_HIT = "contact_point_hit"
     TEMPLATE_SIMILARITY_HIT = "template_similarity_hit"
     ABNORMAL_ACTIVITY_HIT = "abnormal_activity_hit"

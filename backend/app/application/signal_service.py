@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -29,6 +30,102 @@ class SignalService:
         "站外": RiskLevel.MEDIUM,
         "薅羊毛": RiskLevel.MEDIUM,
     }
+    # Black/grey-industry recruitment signal: requires an intent term AND an
+    # incentive cue to co-occur, which is far more precise than a single keyword.
+    RECRUIT_INTENT_TERMS = (
+        "招募",
+        "诚招",
+        "急招",
+        "招代理",
+        "招学员",
+        "收徒",
+        "带做",
+        "带飞",
+        "扩招",
+        "招兼职",
+        "长期有效",
+    )
+    RECRUIT_INCENTIVE_TERMS = (
+        "日结",
+        "佣金",
+        "提成",
+        "月入",
+        "日入",
+        "包教",
+        "包会",
+        "无门槛",
+        "门槛低",
+        "在家",
+        "手机操作",
+        "时间自由",
+        "上不封顶",
+        "返现",
+    )
+    # Black/grey-industry tool/service trafficking: an offer noun (tool/service)
+    # co-occurring with a trade cue (selling / supply / on-demand).
+    SERVICE_OFFER_TERMS = (
+        "外挂",
+        "脚本",
+        "群控",
+        "协议号",
+        "接码",
+        "打码",
+        "解封",
+        "代过",
+        "卡密",
+        "发卡",
+        "号商",
+        "代充",
+        "爆粉",
+        "秒拨",
+        "虚拟号",
+        "采集软件",
+        "引流软件",
+    )
+    SERVICE_TRADE_TERMS = (
+        "出售",
+        "出货",
+        "卖",
+        "有货",
+        "秒发",
+        "接单",
+        "承接",
+        "批发",
+        "供应",
+        "一手",
+        "低价",
+        "质保",
+        "技术支持",
+    )
+    # Off-platform / private-domain traffic routing: a guiding action co-occurring
+    # with an off-platform landing target.
+    TRAFFIC_ACTION_TERMS = (
+        "加我",
+        "扫码",
+        "扫一扫",
+        "私信",
+        "点主页",
+        "看主页",
+        "置顶",
+        "评论区",
+        "进群",
+        "加群",
+        "戳我",
+        "关注公众号",
+    )
+    TRAFFIC_LANDING_TERMS = (
+        "微信",
+        "vx",
+        "v信",
+        "公众号",
+        "电报",
+        "telegram",
+        "tg",
+        "站外",
+        "二维码",
+        "网址",
+        "链接",
+    )
     TEXT_FIELDS = (
         "title",
         "desc",
@@ -128,12 +225,48 @@ class SignalService:
     def delete_signal(self, signal_id: str) -> bool:
         return self.repository.delete_signal(signal_id)
 
+    def delete_signals_for_dataset(self, dataset_id: str) -> int:
+        return self.repository.delete_signals_for_dataset(dataset_id)
+
+    def cluster_by_contact(self, dataset_id: str) -> list[dict[str, Any]]:
+        """Group a dataset's signals by shared contact point into candidate gangs.
+
+        Signals that expose the same ``payload_json.contact_point`` are collected
+        into one cluster — the seed for a gang (团伙) entity. Clusters are ordered
+        by size then peak risk so the most significant candidates surface first.
+        """
+        buckets: dict[str, list[Signal]] = {}
+        for signal in self.repository.list_signals(dataset_id=dataset_id):
+            contact = signal.payload_json.get("contact_point")
+            if not isinstance(contact, str) or not contact.strip():
+                continue
+            buckets.setdefault(contact.strip(), []).append(signal)
+
+        clusters: list[dict[str, Any]] = []
+        for contact, members in buckets.items():
+            risk_levels: dict[str, int] = {}
+            for member in members:
+                key = member.risk_level.value
+                risk_levels[key] = risk_levels.get(key, 0) + 1
+            clusters.append(
+                {
+                    "contact_point": contact,
+                    "signal_ids": [str(member.id) for member in members],
+                    "signal_count": len(members),
+                    "risk_levels": risk_levels,
+                    "max_risk_score": max((member.risk_score for member in members), default=0),
+                }
+            )
+        clusters.sort(key=lambda cluster: (cluster["signal_count"], cluster["max_risk_score"]), reverse=True)
+        return clusters
+
     def extract_from_dataset(
         self,
         *,
         dataset_id: str,
         extractors: list[str] | None = None,
         limit: int = 100,
+        task_run_id: str | None = None,
     ) -> list[Signal]:
         dataset = self.dataset_service.get_dataset(dataset_id)
         if dataset is None:
@@ -153,6 +286,12 @@ class SignalService:
             text = self._record_text(record)
             if "risk_terms" in enabled:
                 created.extend(self._extract_risk_terms(dataset_id, row_index, record, text, dataset_platform))
+            if "recruit_pattern" in enabled:
+                created.extend(self._extract_recruit_pattern(dataset_id, row_index, record, text, dataset_platform))
+            if "service_offer" in enabled:
+                created.extend(self._extract_service_offer(dataset_id, row_index, record, text, dataset_platform))
+            if "traffic_route" in enabled:
+                created.extend(self._extract_traffic_route(dataset_id, row_index, record, text, dataset_platform))
             if "contact_points" in enabled:
                 created.extend(self._extract_contact_points(dataset_id, row_index, record, text, dataset_platform))
 
@@ -171,9 +310,55 @@ class SignalService:
         if "wb_topic_propagation" in enabled:
             created.extend(self._extract_wb_topic_propagation(dataset_id, records, dataset_platform))
 
+        if task_run_id:
+            created = [
+                signal.model_copy(update={"task_run_id": task_run_id})
+                for signal in created
+            ]
+
+        existing_keys = {
+            self._signal_dedupe_key(signal)
+            for signal in self.repository.list_signals(dataset_id=dataset_id)
+        }
+        saved: list[Signal] = []
         for signal in created:
-            self.repository.save_signal(signal)
-        return created
+            dedupe_key = self._signal_dedupe_key(signal)
+            if dedupe_key in existing_keys:
+                continue
+            existing_keys.add(dedupe_key)
+            payload_json = {**signal.payload_json, "dedupe_key": dedupe_key}
+            saved.append(self.repository.save_signal(signal.model_copy(update={"payload_json": payload_json})))
+        return saved
+
+    def _signal_dedupe_key(self, signal: Signal) -> str:
+        existing_key = signal.payload_json.get("dedupe_key")
+        if isinstance(existing_key, str) and existing_key.strip():
+            return existing_key
+
+        payload = signal.payload_json
+        source_ref = payload.get("source_ref") if isinstance(payload.get("source_ref"), dict) else {}
+        identity = {
+            "dataset_id": signal.dataset_id,
+            "signal_type": signal.signal_type.value,
+            "signal_source": signal.signal_source,
+            "row_index": payload.get("row_index") or source_ref.get("row_index"),
+            "source_entity_id": source_ref.get("source_entity_id"),
+            "raw_ref": source_ref.get("raw_ref"),
+            "term": payload.get("term"),
+            "contact_point": payload.get("contact_point"),
+            "contact_points": payload.get("contact_points"),
+            "lead_terms": payload.get("lead_terms"),
+            "template_key": payload.get("template_key"),
+            "seller_template_key": payload.get("seller_template_key"),
+            "activity_key": payload.get("activity_key"),
+            "propagation_key": payload.get("propagation_key"),
+            "row_indexes": payload.get("row_indexes"),
+            "user_ids": payload.get("user_ids"),
+            "price": payload.get("price"),
+            "original_price": payload.get("original_price"),
+            "summary": signal.summary,
+        }
+        return json.dumps(identity, ensure_ascii=False, sort_keys=True, default=str)
 
     def _extract_risk_terms(
         self,
@@ -204,6 +389,96 @@ class SignalService:
                 )
             )
         return signals
+
+    def _extract_recruit_pattern(
+        self,
+        dataset_id: str,
+        row_index: int,
+        record: dict[str, Any],
+        text: str,
+        dataset_platform: str,
+    ) -> list[Signal]:
+        intents = [term for term in self.RECRUIT_INTENT_TERMS if term in text]
+        incentives = [term for term in self.RECRUIT_INCENTIVE_TERMS if term in text]
+        if not intents or not incentives:
+            return []
+        return [
+            Signal(
+                dataset_id=dataset_id,
+                signal_type=SignalType.RECRUIT_PATTERN_HIT,
+                signal_source="rule:recruit_pattern",
+                risk_level=RiskLevel.HIGH,
+                risk_score=self._risk_score(RiskLevel.HIGH),
+                summary=f"疑似黑灰产招募话术：{intents[0]} + {incentives[0]}",
+                payload_json={
+                    "recruit_intent_terms": intents,
+                    "recruit_incentive_terms": incentives,
+                    "row_index": row_index,
+                    "source_ref": self._source_ref(dataset_id, row_index, record, dataset_platform),
+                    "record_excerpt": text[:240],
+                },
+            )
+        ]
+
+    def _extract_service_offer(
+        self,
+        dataset_id: str,
+        row_index: int,
+        record: dict[str, Any],
+        text: str,
+        dataset_platform: str,
+    ) -> list[Signal]:
+        offers = [term for term in self.SERVICE_OFFER_TERMS if term in text]
+        trades = [term for term in self.SERVICE_TRADE_TERMS if term in text]
+        if not offers or not trades:
+            return []
+        return [
+            Signal(
+                dataset_id=dataset_id,
+                signal_type=SignalType.SERVICE_OFFER_HIT,
+                signal_source="rule:service_offer",
+                risk_level=RiskLevel.HIGH,
+                risk_score=self._risk_score(RiskLevel.HIGH),
+                summary=f"疑似黑灰产工具/服务兜售：{offers[0]} + {trades[0]}",
+                payload_json={
+                    "service_offer_terms": offers,
+                    "service_trade_terms": trades,
+                    "row_index": row_index,
+                    "source_ref": self._source_ref(dataset_id, row_index, record, dataset_platform),
+                    "record_excerpt": text[:240],
+                },
+            )
+        ]
+
+    def _extract_traffic_route(
+        self,
+        dataset_id: str,
+        row_index: int,
+        record: dict[str, Any],
+        text: str,
+        dataset_platform: str,
+    ) -> list[Signal]:
+        actions = [term for term in self.TRAFFIC_ACTION_TERMS if term in text]
+        landings = [term for term in self.TRAFFIC_LANDING_TERMS if term in text]
+        if not actions or not landings:
+            return []
+        return [
+            Signal(
+                dataset_id=dataset_id,
+                signal_type=SignalType.TRAFFIC_ROUTE_HIT,
+                signal_source="rule:traffic_route",
+                risk_level=RiskLevel.HIGH,
+                risk_score=self._risk_score(RiskLevel.HIGH),
+                summary=f"疑似站外/私域引流路径：{actions[0]} + {landings[0]}",
+                payload_json={
+                    "traffic_action_terms": actions,
+                    "traffic_landing_terms": landings,
+                    "row_index": row_index,
+                    "source_ref": self._source_ref(dataset_id, row_index, record, dataset_platform),
+                    "record_excerpt": text[:240],
+                },
+            )
+        ]
 
     def _extract_contact_points(
         self,

@@ -45,6 +45,9 @@ class AnalysisService:
     def get_outputs_for_jobs(self, job_ids: list[str]) -> list[AnalysisOutput]:
         return self.repository.list_outputs_for_jobs(job_ids)
 
+    def delete_jobs_for_dataset(self, dataset_id: str) -> int:
+        return self.repository.delete_jobs_for_dataset(dataset_id)
+
     def create_job(
         self,
         *,

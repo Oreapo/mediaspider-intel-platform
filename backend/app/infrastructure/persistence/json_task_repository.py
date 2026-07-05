@@ -93,6 +93,7 @@ class JsonCollectionTaskRepository(CollectionTaskRepository):
         if len(filtered) == len(tasks):
             return False
         self._save_all(filtered)
+        self._save_runs([run for run in self._load_runs() if run.task_id != task_id])
         return True
 
     def list_runs(

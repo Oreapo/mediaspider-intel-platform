@@ -39,3 +39,7 @@ class AnalysisRepository(ABC):
     @abstractmethod
     def save_output(self, output: AnalysisOutput) -> AnalysisOutput:
         raise NotImplementedError
+
+    @abstractmethod
+    def delete_jobs_for_dataset(self, dataset_id: str) -> int:
+        raise NotImplementedError

@@ -173,6 +173,19 @@ def test_role_specific_write_permissions(tmp_path, monkeypatch):
         )
         assert analyst_task_response.status_code == 403
 
+        task_id = operator_task_response.json()["task"]["id"]
+        analyst_retry_response = client.post(
+            f"/api/tasks/{task_id}/runs/missing-run/retry",
+            headers=analyst_headers,
+        )
+        assert analyst_retry_response.status_code == 403
+
+        operator_retry_response = client.post(
+            f"/api/tasks/{task_id}/runs/missing-run/retry",
+            headers=operator_headers,
+        )
+        assert operator_retry_response.status_code == 404
+
         analyst_case_response = client.post(
             "/api/cases",
             json={

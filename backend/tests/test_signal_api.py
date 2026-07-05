@@ -212,6 +212,360 @@ def test_signal_extraction_preserves_source_traceability(tmp_path):
         set_container(original_container)
 
 
+def test_recruit_pattern_extractor_requires_intent_and_incentive(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        sample_path = dataset_file_dir / "recruit_notes.jsonl"
+        sample_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {"content_id": "r1", "title": "诚招代理", "body": "日结佣金，上不封顶，带做"},
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {"content_id": "r2", "title": "招募", "body": "招募志愿者参加公益活动"},
+                        ensure_ascii=False,
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Recruit Notes",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "gray_recruitment",
+                "storage_uri": "recruit_notes.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        extract_response = client.post(
+            "/api/signals/extract",
+            json={
+                "dataset_id": dataset_id,
+                "extractors": ["recruit_pattern"],
+                "limit": 20,
+            },
+        )
+        assert extract_response.status_code == 200
+        signals = extract_response.json()["signals"]
+        recruit_signals = [s for s in signals if s["signal_type"] == "recruit_pattern_hit"]
+        # Only the row with both an intent term and an incentive cue should hit.
+        assert len(recruit_signals) == 1
+        hit = recruit_signals[0]
+        assert hit["payload_json"]["source_ref"]["row_index"] == 0
+        assert hit["payload_json"]["recruit_intent_terms"]
+        assert hit["payload_json"]["recruit_incentive_terms"]
+    finally:
+        set_container(original_container)
+
+
+def test_service_offer_extractor_requires_offer_and_trade(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        sample_path = dataset_file_dir / "service_notes.jsonl"
+        sample_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {"content_id": "s1", "title": "协议号出售", "body": "号商一手货源，秒发质保"},
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {"content_id": "s2", "title": "脚本", "body": "分享一个学习脚本的教程"},
+                        ensure_ascii=False,
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Service Notes",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "gray_recruitment",
+                "storage_uri": "service_notes.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        extract_response = client.post(
+            "/api/signals/extract",
+            json={
+                "dataset_id": dataset_id,
+                "extractors": ["service_offer"],
+                "limit": 20,
+            },
+        )
+        assert extract_response.status_code == 200
+        signals = extract_response.json()["signals"]
+        offer_signals = [s for s in signals if s["signal_type"] == "service_offer_hit"]
+        # Only the row with both an offer noun and a trade cue should hit.
+        assert len(offer_signals) == 1
+        hit = offer_signals[0]
+        assert hit["payload_json"]["source_ref"]["row_index"] == 0
+        assert hit["payload_json"]["service_offer_terms"]
+        assert hit["payload_json"]["service_trade_terms"]
+    finally:
+        set_container(original_container)
+
+
+def test_traffic_route_extractor_requires_action_and_landing(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        sample_path = dataset_file_dir / "traffic_notes.jsonl"
+        sample_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {"content_id": "t1", "title": "扫码进群", "body": "加我微信领福利"},
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {"content_id": "t2", "title": "日常分享", "body": "今天天气不错"},
+                        ensure_ascii=False,
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Traffic Notes",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+                "storage_uri": "traffic_notes.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        extract_response = client.post(
+            "/api/signals/extract",
+            json={
+                "dataset_id": dataset_id,
+                "extractors": ["traffic_route"],
+                "limit": 20,
+            },
+        )
+        assert extract_response.status_code == 200
+        signals = extract_response.json()["signals"]
+        route_signals = [s for s in signals if s["signal_type"] == "traffic_route_hit"]
+        # Only the row with both a guiding action and an off-platform landing should hit.
+        assert len(route_signals) == 1
+        hit = route_signals[0]
+        assert hit["payload_json"]["source_ref"]["row_index"] == 0
+        assert hit["payload_json"]["traffic_action_terms"]
+        assert hit["payload_json"]["traffic_landing_terms"]
+    finally:
+        set_container(original_container)
+
+
+def test_cluster_by_contact_groups_signals_sharing_contact_point(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        (dataset_file_dir / "cluster_source.jsonl").write_text(
+            json.dumps({"content_id": "c1", "body": "seed"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Cluster Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "gray_recruitment",
+                "storage_uri": "cluster_source.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        def make_signal(contact, risk_level, risk_score):
+            return client.post(
+                "/api/signals",
+                json={
+                    "dataset_id": dataset_id,
+                    "signal_type": "contact_point_hit" if contact else "risk_term_hit",
+                    "signal_source": "rule:test",
+                    "risk_level": risk_level,
+                    "risk_score": risk_score,
+                    "summary": f"test {contact or 'none'}",
+                    "status": "new",
+                    "payload_json": {"contact_point": contact} if contact else {},
+                },
+            )
+
+        make_signal("wxid_gang01", "high", 85)
+        make_signal("wxid_gang01", "critical", 95)
+        make_signal("qq_88888", "medium", 60)
+        make_signal(None, "low", 20)  # no contact point -> excluded from clusters
+
+        clusters = test_container.signal_service.cluster_by_contact(dataset_id)
+        assert len(clusters) == 2
+        # Largest cluster (shared contact) surfaces first.
+        assert clusters[0]["contact_point"] == "wxid_gang01"
+        assert clusters[0]["signal_count"] == 2
+        assert clusters[0]["risk_levels"] == {"high": 1, "critical": 1}
+        assert clusters[0]["max_risk_score"] == 95
+        assert clusters[1]["contact_point"] == "qq_88888"
+        assert clusters[1]["signal_count"] == 1
+    finally:
+        set_container(original_container)
+
+
+def test_signal_clusters_endpoint_returns_grouped_contacts(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        (dataset_file_dir / "cluster_api.jsonl").write_text(
+            json.dumps({"content_id": "c1", "body": "seed"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Cluster API Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "gray_recruitment",
+                "storage_uri": "cluster_api.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        for contact, risk in [("wxid_gang01", "high"), ("wxid_gang01", "critical"), ("qq_88888", "medium")]:
+            client.post(
+                "/api/signals",
+                json={
+                    "dataset_id": dataset_id,
+                    "signal_type": "contact_point_hit",
+                    "signal_source": "rule:test",
+                    "risk_level": risk,
+                    "risk_score": 80,
+                    "summary": f"test {contact}",
+                    "status": "new",
+                    "payload_json": {"contact_point": contact},
+                },
+            )
+
+        response = client.get("/api/signals/clusters", params={"dataset_id": dataset_id})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2
+        assert data["clusters"][0]["contact_point"] == "wxid_gang01"
+        assert data["clusters"][0]["signal_count"] == 2
+    finally:
+        set_container(original_container)
+
+
+def test_signal_clusters_endpoint_edge_cases(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+
+        # Unknown dataset -> valid empty result, not an error.
+        response = client.get("/api/signals/clusters", params={"dataset_id": "ds_missing"})
+        assert response.status_code == 200
+        assert response.json() == {"clusters": [], "total": 0}
+
+        # Missing dataset_id -> validation error (query param is required).
+        assert client.get("/api/signals/clusters").status_code == 422
+
+        # Blank dataset_id -> validation error (min_length=1).
+        assert client.get("/api/signals/clusters", params={"dataset_id": ""}).status_code == 422
+    finally:
+        set_container(original_container)
+
+
+def test_signal_extraction_is_idempotent_for_same_dataset(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        sample_path = dataset_file_dir / "repeat_extract.jsonl"
+        sample_path.write_text(
+            json.dumps(
+                {
+                    "content_id": "note_repeat_001",
+                    "title": "兼职招募",
+                    "body": "微信 abc12345 领取资料",
+                    "source_url": "https://example.test/note_repeat_001",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_response = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Repeat Extract Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+                "storage_uri": "repeat_extract.jsonl",
+            },
+        )
+        dataset_id = dataset_response.json()["dataset"]["id"]
+        payload = {
+            "dataset_id": dataset_id,
+            "extractors": ["risk_terms", "contact_points"],
+            "limit": 20,
+        }
+
+        first_response = client.post("/api/signals/extract", json=payload)
+        assert first_response.status_code == 200
+        first_signals = first_response.json()["signals"]
+        assert len(first_signals) >= 2
+        assert all(item["payload_json"].get("dedupe_key") for item in first_signals)
+
+        second_response = client.post("/api/signals/extract", json=payload)
+        assert second_response.status_code == 200
+        assert second_response.json()["signals"] == []
+
+        list_response = client.get("/api/signals", params={"dataset_id": dataset_id})
+        assert list_response.status_code == 200
+        assert list_response.json()["total"] == len(first_signals)
+    finally:
+        set_container(original_container)
+
+
 def test_signal_list_supports_filters_search_and_pagination(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container

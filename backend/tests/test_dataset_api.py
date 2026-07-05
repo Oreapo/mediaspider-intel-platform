@@ -66,6 +66,58 @@ def test_dataset_crud_and_preview(tmp_path):
         set_container(original_container)
 
 
+def test_dataset_delete_conflicts_then_cascades_linked_signals(tmp_path):
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        (dataset_file_dir / "cascade.jsonl").write_text(
+            json.dumps({"title": "seed"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Cascade Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+                "storage_uri": "cascade.jsonl",
+            },
+        ).json()["dataset"]["id"]
+        client.post(
+            "/api/signals",
+            json={
+                "dataset_id": dataset_id,
+                "signal_type": "contact_point_hit",
+                "signal_source": "rule:test",
+                "risk_level": "high",
+                "risk_score": 80,
+                "summary": "linked signal",
+                "status": "new",
+                "payload_json": {"contact_point": "wx1"},
+            },
+        )
+
+        # Delete without cascade is blocked while linked signals exist.
+        conflict = client.delete(f"/api/datasets/{dataset_id}")
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["signal_count"] == 1
+        assert client.get("/api/signals", params={"dataset_id": dataset_id}).json()["total"] == 1
+
+        # Cascade delete removes the dataset and its linked signals.
+        cascade = client.delete(f"/api/datasets/{dataset_id}", params={"cascade": "true"})
+        assert cascade.status_code == 200
+        assert cascade.json()["deleted_signal_count"] == 1
+        assert client.get("/api/signals", params={"dataset_id": dataset_id}).json()["total"] == 0
+    finally:
+        set_container(original_container)
+
+
 def test_jsonl_preview_limits_records_not_physical_lines(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container

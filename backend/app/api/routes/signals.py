@@ -64,7 +64,19 @@ def extract_signals(
     return {
         "message": "Signals extracted",
         "signals": [signal.model_dump(mode="json") for signal in signals],
+        "created_count": len(signals),
+        "dedupe_enabled": True,
     }
+
+
+@router.get("/clusters")
+def list_signal_clusters(
+    dataset_id: str = Query(..., min_length=1),
+    service: SignalService = Depends(get_signal_service),
+):
+    """Candidate gangs (团伙) — a dataset's signals grouped by shared contact point."""
+    clusters = service.cluster_by_contact(dataset_id)
+    return {"clusters": clusters, "total": len(clusters)}
 
 
 @router.get("/{signal_id}/detail")

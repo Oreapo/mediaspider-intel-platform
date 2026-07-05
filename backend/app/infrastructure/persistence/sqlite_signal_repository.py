@@ -132,6 +132,17 @@ class SQLiteSignalRepository(SignalRepository):
             connection.commit()
             return cursor.rowcount > 0
 
+    def delete_signals_for_dataset(self, dataset_id: str) -> int:
+        normalized_dataset_id = dataset_id.strip()
+        if not normalized_dataset_id:
+            return 0
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM signals WHERE dataset_id = ?", (normalized_dataset_id,)
+            )
+            connection.commit()
+            return cursor.rowcount
+
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(

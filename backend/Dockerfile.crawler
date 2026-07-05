@@ -1,0 +1,30 @@
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app/backend
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        chromium \
+        dumb-init \
+        fonts-noto-cjk \
+        libgl1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt ./requirements.txt
+COPY backend/requirements-mediacrawler.txt ./requirements-mediacrawler.txt
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-mediacrawler.txt
+
+COPY backend/app ./app
+COPY backend/scripts ./scripts
+COPY --from=mediacrawler . /opt/mediacrawler
+
+RUN mkdir -p /app/backend/storage /opt/mediacrawler/browser_data
+
+EXPOSE 8000
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["python", "scripts/start_backend.py"]

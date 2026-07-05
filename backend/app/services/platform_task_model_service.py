@@ -64,9 +64,42 @@ class PlatformTaskModelService:
                 visible_for_modes=["creator"],
             ),
             PlatformFieldSchema(key="start_page", label="起始页", group="runtime", control="number", default=1),
+            PlatformFieldSchema(
+                key="login_type",
+                label="登录方式",
+                group="runtime",
+                control="select",
+                default="qrcode",
+                options=[
+                    PlatformFieldOption(value="qrcode", label="二维码"),
+                    PlatformFieldOption(value="phone", label="手机号"),
+                    PlatformFieldOption(value="cookie", label="Cookie"),
+                ],
+            ),
+            PlatformFieldSchema(
+                key="save_option",
+                label="保存格式",
+                group="runtime",
+                control="select",
+                default="jsonl",
+                options=[
+                    PlatformFieldOption(value="jsonl", label="JSONL"),
+                    PlatformFieldOption(value="json", label="JSON"),
+                    PlatformFieldOption(value="csv", label="CSV"),
+                ],
+            ),
             PlatformFieldSchema(key="enable_comments", label="抓取评论", group="runtime", control="switch", default=True),
             PlatformFieldSchema(key="enable_sub_comments", label="抓取二级评论", group="runtime", control="switch", default=False),
             PlatformFieldSchema(key="headless", label="无头模式", group="runtime", control="switch", default=False),
+            PlatformFieldSchema(key="max_comments_count_singlenotes", label="单条最大评论数", group="runtime", control="number", default=10),
+            PlatformFieldSchema(key="max_concurrency_num", label="最大并发数", group="runtime", control="number", default=1),
+            PlatformFieldSchema(
+                key="signal_extractors",
+                label="信号提取器",
+                group="analysis",
+                control="tags",
+                help_text="选择采集完成后要运行的风险信号规则。",
+            ),
             PlatformFieldSchema(
                 key="analysis_types",
                 label="分析类型",
@@ -77,6 +110,9 @@ class PlatformTaskModelService:
         ]
         base_social_extractors = [
             "risk_terms",
+            "recruit_pattern",
+            "service_offer",
+            "traffic_route",
             "contact_points",
             "template_similarity",
             "abnormal_activity",
@@ -88,13 +124,13 @@ class PlatformTaskModelService:
         }
         social_models = []
         for platform, label, summary, entity_types in [
-            ("xhs", "Xiaohongshu", "图文 / 视频 / 创作者内容采集", ["content", "comment", "creator"]),
-            ("dy", "Douyin", "短视频与创作者采集", ["content", "comment", "creator"]),
-            ("ks", "Kuaishou", "短视频与互动数据采集", ["content", "comment", "creator"]),
-            ("bili", "Bilibili", "视频内容与创作者采集", ["content", "comment", "creator"]),
-            ("wb", "Weibo", "话题与舆情内容采集", ["content", "comment", "creator"]),
-            ("tieba", "Tieba", "帖子与吧内互动采集", ["content", "comment", "creator"]),
-            ("zhihu", "Zhihu", "问答 / 文章 / 创作者采集", ["content", "comment", "creator"]),
+            ("xhs", "小红书", "图文 / 视频 / 创作者内容采集", ["content", "comment", "creator"]),
+            ("dy", "抖音", "短视频与创作者采集", ["content", "comment", "creator"]),
+            ("ks", "快手", "短视频与互动数据采集", ["content", "comment", "creator"]),
+            ("bili", "哔哩哔哩", "视频内容与创作者采集", ["content", "comment", "creator"]),
+            ("wb", "微博", "话题与舆情内容采集", ["content", "comment", "creator"]),
+            ("tieba", "百度贴吧", "帖子与吧内互动采集", ["content", "comment", "creator"]),
+            ("zhihu", "知乎", "问答 / 文章 / 创作者采集", ["content", "comment", "creator"]),
         ]:
             social_models.append(
                 PlatformTaskModelResponse(
@@ -122,7 +158,7 @@ class PlatformTaskModelService:
         social_models.append(
             PlatformTaskModelResponse(
                 platform="xianyu",
-                label="Xianyu",
+                label="闲鱼",
                 summary="商品、卖家、价格带和上新行为采集",
                 supported_entity_types=["product", "seller", "price_snapshot"],
                 supported_modes=["search", "detail"],

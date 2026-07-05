@@ -10,6 +10,7 @@ from backend.app.__main__ import (
     backend_server_config,
     load_local_environment,
 )
+from backend.app.api.dependencies.container import AppContainer
 
 
 def test_local_server_config_uses_safe_development_defaults(monkeypatch):
@@ -42,6 +43,29 @@ def test_local_environment_loads_dotenv_without_overriding_shell_values(monkeypa
 
     assert os.environ["MEDIASPIDER_BACKEND_HOST"] == "127.0.0.1"
     assert os.environ["MEDIASPIDER_BACKEND_PORT"] == "9001"
+
+
+def test_container_resolves_relative_storage_paths_from_project_root(monkeypatch, tmp_path):
+    project_root = tmp_path / "mediaspider-intel-platform"
+    backend_root = project_root / "backend"
+    backend_root.mkdir(parents=True)
+    monkeypatch.setenv("MEDIASPIDER_STORAGE_DIR", "backend/storage")
+    monkeypatch.setenv("MEDIASPIDER_SQLITE_PATH", "backend/storage/app.sqlite3")
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", "json")
+
+    container = AppContainer(backend_root)
+
+    assert container.storage_dir == (project_root / "backend" / "storage").resolve()
+    assert container._sqlite_path() == (project_root / "backend" / "storage" / "app.sqlite3").resolve()
+
+
+def test_container_uses_configured_media_crawler_command(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIASPIDER_MEDIA_CRAWLER_COMMAND", "python main.py")
+    monkeypatch.setenv("MEDIASPIDER_REPOSITORY_MODE", "json")
+
+    container = AppContainer(tmp_path)
+
+    assert container._crawler_runner.command_prefix == ["python", "main.py"]
 
 
 @pytest.mark.parametrize("value", ["invalid", "0", "65536"])

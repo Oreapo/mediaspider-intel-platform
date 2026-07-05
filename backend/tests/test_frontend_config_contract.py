@@ -13,11 +13,16 @@ FRONTEND_API_DIR = FRONTEND_SRC / "api"
 FRONTEND_HTTP_CLIENT = FRONTEND_SRC / "lib" / "http.ts"
 FRONTEND_VITE_CONFIG = ROOT / "frontend" / "vite.config.ts"
 FRONTEND_SETTINGS_VIEW = FRONTEND_SRC / "views" / "SettingsView.vue"
+FRONTEND_TASKS_VIEW = FRONTEND_SRC / "views" / "TasksView.vue"
 DOCKER_COMPOSE = ROOT / "docker-compose.yml"
+CRAWLER_DOCKER_COMPOSE = ROOT / "docker-compose.crawler.yml"
 BACKEND_DOCKERFILE = ROOT / "backend" / "Dockerfile"
+CRAWLER_BACKEND_DOCKERFILE = ROOT / "backend" / "Dockerfile.crawler"
 FRONTEND_NGINX_CONFIG = ROOT / "frontend" / "nginx.conf"
 DEFAULT_BACKEND_TARGET = "http://127.0.0.1:8180"
 VITE_FRONTEND_ORIGINS = {
+    "http://127.0.0.1:5200",
+    "http://localhost:5200",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
     "http://127.0.0.1:4173",
@@ -47,7 +52,11 @@ def test_env_example_cors_origins_cover_local_frontends():
     assert env_values["MEDIASPIDER_STORAGE_DIR"] == "backend/storage"
     assert env_values["MEDIASPIDER_SQLITE_PATH"] == "backend/storage/mediaspider-intel.sqlite3"
     assert env_values["MEDIASPIDER_API_TARGET"] == DEFAULT_BACKEND_TARGET
+    assert env_values["MEDIASPIDER_FRONTEND_PORT"] == "5200"
+    assert env_values["MEDIASPIDER_FRONTEND_URL"] == "http://127.0.0.1:5200"
     assert env_values["VITE_API_BASE_URL"] == "/api"
+    assert "MEDIASPIDER_MEDIA_CRAWLER_COMMAND" in env_values
+    assert "MEDIASPIDER_MEDIA_CRAWLER_HOST_PATH" in env_values
 
 
 def test_vite_proxy_uses_default_backend_target_for_dev_and_preview():
@@ -63,6 +72,7 @@ def test_vite_proxy_uses_default_backend_target_for_dev_and_preview():
             re.S,
         )
     assert re.search(r"server:\s*\{.*?proxy:\s*apiProxy", config, re.S)
+    assert "MEDIASPIDER_FRONTEND_PORT" in config
     assert re.search(r"preview:\s*\{.*?proxy:\s*apiProxy", config, re.S)
 
 
@@ -90,6 +100,23 @@ def test_docker_network_keeps_backend_container_port():
     assert "127.0.0.1:8000/health" in compose
     assert "http://backend:8000/api/" in nginx
     assert "http://backend:8000/health" in nginx
+
+
+def test_crawler_docker_overlay_packages_runtime_and_browser():
+    compose = CRAWLER_DOCKER_COMPOSE.read_text(encoding="utf-8")
+    dockerfile = CRAWLER_BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "backend/Dockerfile.crawler" in compose
+    assert "additional_contexts:" in compose
+    assert "MEDIASPIDER_MEDIA_CRAWLER_HOST_PATH" in compose
+    assert "MEDIASPIDER_MEDIA_CRAWLER_ROOT: /opt/mediacrawler" in compose
+    assert "MEDIASPIDER_MEDIA_CRAWLER_COMMAND: python /app/backend/scripts/run_mediacrawler.py" in compose
+    assert "mediaspider-browser-data:/opt/mediacrawler/browser_data" in compose
+    assert 'shm_size: "1gb"' in compose
+    assert "chromium" in dockerfile
+    assert "requirements-mediacrawler.txt" in dockerfile
+    assert "COPY --from=mediacrawler . /opt/mediacrawler" in dockerfile
+    assert 'ENTRYPOINT ["dumb-init", "--"]' in dockerfile
 
 
 def test_frontend_api_base_url_is_centralized_in_http_client():
@@ -169,6 +196,24 @@ def test_settings_platform_profile_options_use_backend_platform_models():
     assert "usePlatformModels" in settings_view
     assert re.search(r'v-for="item in profilePlatformOptions"', settings_view)
     assert re.findall(r'<option\s+value=["\'](?:xhs|dy|ks|bili|wb|tieba|zhihu|xianyu)["\']', settings_view) == []
+
+
+def test_task_creation_form_sends_crawler_runtime_and_storage_options():
+    tasks_view = FRONTEND_TASKS_VIEW.read_text(encoding="utf-8")
+
+    for text in [
+        "auth_profile_id: form.value.auth_profile_id || null",
+        "signal_extractors: toStringList(form.value.signal_extractors)",
+        "login_type: form.value.login_type",
+        "save_option: form.value.save_option",
+        "max_comments_count_singlenotes: form.value.max_comments_count_singlenotes",
+        "max_concurrency_num: form.value.max_concurrency_num",
+    ]:
+        assert text in tasks_view
+
+    assert "usePlatformProfiles" in tasks_view
+    assert "profile.platform === form.value.platform" in tasks_view
+    assert "profile.auth_type !== 'state_file'" in tasks_view
 
 
 def _frontend_source_files() -> list[Path]:

@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..dependencies import READ_ROLES, WORKFLOW_ROLES, get_dataset_service, require_roles
+from ..dependencies import (
+    READ_ROLES,
+    WORKFLOW_ROLES,
+    get_analysis_service,
+    get_dataset_service,
+    get_signal_service,
+    require_roles,
+)
 from ..schemas.dataset import DatasetCreateRequest
+from ...application.analysis_service import AnalysisService
 from ...application.dataset_service import DatasetService
+from ...application.signal_service import SignalService
 from ...domain.models.dataset import DatasetType
 from ...domain.models.platform import PlatformKey
 from ...domain.models.task import ScenarioType
@@ -59,12 +68,38 @@ def create_dataset(
 def delete_dataset(
     dataset_id: str,
     delete_storage: bool = Query(False),
+    cascade: bool = Query(False),
     service: DatasetService = Depends(get_dataset_service),
+    signal_service: SignalService = Depends(get_signal_service),
+    analysis_service: AnalysisService = Depends(get_analysis_service),
 ):
+    if service.get_dataset(dataset_id) is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    related_signals = signal_service.list_signals(dataset_id=dataset_id)
+    related_analysis_count = analysis_service.list_jobs_page(dataset_id=dataset_id, limit=1)[1]
+    if (related_signals or related_analysis_count) and not cascade:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Dataset has linked signals or analysis jobs. Retry with cascade=true to delete them.",
+                "signal_count": len(related_signals),
+                "analysis_job_count": related_analysis_count,
+            },
+        )
+
+    if cascade:
+        signal_service.delete_signals_for_dataset(dataset_id)
+        analysis_service.delete_jobs_for_dataset(dataset_id)
+
     deleted = service.delete_dataset(dataset_id, delete_storage=delete_storage)
     if not deleted:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    return {"message": "Dataset deleted"}
+    return {
+        "message": "Dataset deleted",
+        "deleted_signal_count": len(related_signals) if cascade else 0,
+        "deleted_analysis_job_count": related_analysis_count if cascade else 0,
+    }
 
 
 @router.get("/{dataset_id}/preview")

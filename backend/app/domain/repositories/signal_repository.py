@@ -43,3 +43,7 @@ class SignalRepository(ABC):
     @abstractmethod
     def delete_signal(self, signal_id: str) -> bool:
         raise NotImplementedError
+
+    @abstractmethod
+    def delete_signals_for_dataset(self, dataset_id: str) -> int:
+        raise NotImplementedError

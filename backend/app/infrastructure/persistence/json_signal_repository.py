@@ -81,6 +81,17 @@ class JsonSignalRepository(SignalRepository):
         self._save_all(filtered)
         return True
 
+    def delete_signals_for_dataset(self, dataset_id: str) -> int:
+        normalized_dataset_id = dataset_id.strip()
+        if not normalized_dataset_id:
+            return 0
+        signals = self._load_all()
+        filtered = [signal for signal in signals if signal.dataset_id != normalized_dataset_id]
+        deleted = len(signals) - len(filtered)
+        if deleted:
+            self._save_all(filtered)
+        return deleted
+
     def _filtered_signals(
         self,
         *,

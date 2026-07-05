@@ -129,6 +129,11 @@ def test_dashboard_summary_aggregates_intelligence_flow(tmp_path):
         assert payload["breakdowns"]["case_priorities"] == {"high": 1, "critical": 1}
         assert payload["risk_distribution"]["platforms"][0]["key"] == "xhs"
         assert payload["risk_distribution"]["platforms"][0]["high_risk_signal_count"] == 2
+        assert payload["risk_distribution"]["platforms"][0]["risk_levels"] == {"high": 1, "critical": 1}
+        assert payload["risk_distribution"]["platforms"][0]["signal_types"] == {
+            "contact_point_hit": 1,
+            "risk_term_hit": 1,
+        }
         assert payload["risk_distribution"]["scenarios"][0]["key"] == "lead_diversion"
         assert payload["risk_distribution"]["scenarios"][0]["case_count"] == 2
         assert payload["pending"]["high_risk_signals"][0]["id"] == pending_signal["id"]
