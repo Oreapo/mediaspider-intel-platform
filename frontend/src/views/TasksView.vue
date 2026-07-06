@@ -12,6 +12,7 @@ import {
   startTaskRun,
 } from '../api/tasks'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -447,47 +448,40 @@ onMounted(loadSchedulerStatus)
         <div class="grid-two">
           <label class="field">
             <span>{{ t('tasks.platform') }}</span>
-            <div class="select-with-icon">
-              <PlatformLogo :platform="form.platform" :size="18" class="select-icon" />
-              <select v-model="form.platform">
-                <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                  {{ labelValue(item.platform) }}
-                </option>
-              </select>
-            </div>
+            <AppSelect
+              v-model="form.platform"
+              :options="platformItems.map((item) => ({
+                value: item.platform,
+                label: labelValue(item.platform),
+                platform: item.platform,
+              }))"
+            />
           </label>
 
           <label class="field">
             <span>{{ t('tasks.entityType') }}</span>
-            <select v-model="form.entity_type">
-              <option
-                v-for="entity in selectedModel?.supported_entity_types || []"
-                :key="entity"
-                :value="entity"
-              >
-                {{ entity }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="form.entity_type"
+              :options="(selectedModel?.supported_entity_types || []).map((entity) => ({
+                value: entity,
+                label: entity,
+              }))"
+            />
           </label>
         </div>
 
         <div class="grid-two">
           <label class="field">
             <span>{{ t('tasks.scenario') }}</span>
-            <select v-model="form.scenario_type">
-              <option v-for="item in scenarioOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
+            <AppSelect v-model="form.scenario_type" :options="scenarioOptions" />
           </label>
 
           <label class="field">
             <span>{{ t('tasks.taskMode') }}</span>
-            <select v-model="form.task_mode">
-              <option v-for="mode in selectedModel?.supported_modes || []" :key="mode" :value="mode">
-                {{ mode }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="form.task_mode"
+              :options="(selectedModel?.supported_modes || []).map((mode) => ({ value: mode, label: mode }))"
+            />
           </label>
 
         </div>
@@ -501,24 +495,32 @@ onMounted(loadSchedulerStatus)
 
           <label class="field">
             <span>{{ t('tasks.queuePriority') }}</span>
-            <select v-model="form.queue_priority">
-              <option value="low">{{ t('enum.low') }}</option>
-              <option value="normal">{{ t('enum.normal') }}</option>
-              <option value="high">{{ t('enum.high') }}</option>
-              <option value="critical">{{ t('enum.critical') }}</option>
-            </select>
+            <AppSelect
+              v-model="form.queue_priority"
+              :options="[
+                { value: 'low', label: t('enum.low') },
+                { value: 'normal', label: t('enum.normal') },
+                { value: 'high', label: t('enum.high') },
+                { value: 'critical', label: t('enum.critical') },
+              ]"
+            />
           </label>
         </div>
 
         <div class="grid-two">
           <label class="field">
             <span>{{ t('tasks.authProfile') }}</span>
-            <select v-model="form.auth_profile_id" :disabled="profilesLoading">
-              <option value="">{{ t('tasks.authProfileNone') }}</option>
-              <option v-for="profile in availableProfiles" :key="profile.id" :value="profile.id">
-                {{ profile.profile_name }} · {{ labelValue(profile.auth_type) }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="form.auth_profile_id"
+              :disabled="profilesLoading"
+              :options="[
+                { value: '', label: t('tasks.authProfileNone') },
+                ...availableProfiles.map((profile) => ({
+                  value: profile.id,
+                  label: `${profile.profile_name} · ${labelValue(profile.auth_type)}`,
+                })),
+              ]"
+            />
             <small v-if="!profilesLoading && !profilesError && !availableProfiles.length">
               {{ t('tasks.authProfileEmpty') }}
             </small>
@@ -527,20 +529,26 @@ onMounted(loadSchedulerStatus)
 
           <label class="field">
             <span>{{ t('tasks.loginType') }}</span>
-            <select v-model="form.login_type">
-              <option value="qrcode">{{ t('tasks.loginTypeQrcode') }}</option>
-              <option value="phone">{{ t('tasks.loginTypePhone') }}</option>
-              <option value="cookie">{{ t('tasks.loginTypeCookie') }}</option>
-            </select>
+            <AppSelect
+              v-model="form.login_type"
+              :options="[
+                { value: 'qrcode', label: t('tasks.loginTypeQrcode') },
+                { value: 'phone', label: t('tasks.loginTypePhone') },
+                { value: 'cookie', label: t('tasks.loginTypeCookie') },
+              ]"
+            />
           </label>
 
           <label class="field">
             <span>{{ t('tasks.saveOption') }}</span>
-            <select v-model="form.save_option">
-              <option value="jsonl">JSONL</option>
-              <option value="json">JSON</option>
-              <option value="csv">CSV</option>
-            </select>
+            <AppSelect
+              v-model="form.save_option"
+              :options="[
+                { value: 'jsonl', label: 'JSONL' },
+                { value: 'json', label: 'JSON' },
+                { value: 'csv', label: 'CSV' },
+              ]"
+            />
           </label>
         </div>
 
@@ -717,51 +725,56 @@ onMounted(loadSchedulerStatus)
 
         <label class="field">
           <span>{{ t('tasks.platform') }}</span>
-          <div class="select-with-icon">
-            <PlatformLogo v-if="filters.platform" :platform="filters.platform" :size="18" class="select-icon" />
-            <select v-model="filters.platform" :class="{ 'no-icon': !filters.platform }">
-              <option value="">{{ t('tasks.allPlatforms') }}</option>
-              <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                {{ labelValue(item.platform) }}
-              </option>
-            </select>
-          </div>
+          <AppSelect
+            v-model="filters.platform"
+            :options="[
+              { value: '', label: t('tasks.allPlatforms') },
+              ...platformItems.map((item) => ({ value: item.platform, label: labelValue(item.platform), platform: item.platform })),
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('tasks.status') }}</span>
-          <select v-model="filters.status">
-            <option value="">{{ t('tasks.allStatuses') }}</option>
-            <option value="draft">{{ t('enum.draft') }}</option>
-            <option value="enabled">{{ t('enum.enabled') }}</option>
-            <option value="disabled">{{ t('enum.disabled') }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.status"
+            :options="[
+              { value: '', label: t('tasks.allStatuses') },
+              { value: 'draft', label: t('enum.draft') },
+              { value: 'enabled', label: t('enum.enabled') },
+              { value: 'disabled', label: t('enum.disabled') },
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('tasks.mode') }}</span>
-          <select v-model="filters.task_mode">
-            <option value="">{{ t('tasks.allModes') }}</option>
-            <option v-for="item in taskModes" :key="item" :value="item">{{ item }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.task_mode"
+            :options="[
+              { value: '', label: t('tasks.allModes') },
+              ...taskModes.map((item) => ({ value: item, label: item })),
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('tasks.entity') }}</span>
-          <select v-model="filters.entity_type">
-            <option value="">{{ t('tasks.allEntities') }}</option>
-            <option v-for="item in entityTypes" :key="item" :value="item">{{ item }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.entity_type"
+            :options="[
+              { value: '', label: t('tasks.allEntities') },
+              ...entityTypes.map((item) => ({ value: item, label: item })),
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('tasks.scenario') }}</span>
-          <select v-model="filters.scenario_type">
-            <option value="">{{ t('tasks.allScenarios') }}</option>
-            <option v-for="item in scenarioOptions" :key="item.value" :value="item.value">
-              {{ item.label }}
-            </option>
-          </select>
+          <AppSelect
+            v-model="filters.scenario_type"
+            :options="[{ value: '', label: t('tasks.allScenarios') }, ...scenarioOptions]"
+          />
         </label>
 
         <label class="field">
@@ -946,9 +959,21 @@ onMounted(loadSchedulerStatus)
 }
 
 .filter-form {
-  grid-template-columns: 1.3fr repeat(6, minmax(0, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 14px;
   align-items: end;
   margin-bottom: 18px;
+}
+
+.filter-form .field {
+  flex: 1 1 158px;
+  min-width: 150px;
+}
+
+.filter-form .filter-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .field {
@@ -973,27 +998,6 @@ onMounted(loadSchedulerStatus)
 
 .field textarea {
   resize: vertical;
-}
-
-.select-with-icon {
-  position: relative;
-}
-
-.select-with-icon .select-icon {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #0f766e;
-  pointer-events: none;
-}
-
-.select-with-icon select {
-  padding-left: 38px;
-}
-
-.select-with-icon select.no-icon {
-  padding-left: 14px;
 }
 
 .platform-line {
@@ -1208,7 +1212,7 @@ onMounted(loadSchedulerStatus)
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

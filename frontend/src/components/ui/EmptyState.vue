@@ -1,10 +1,17 @@
 <script setup lang="ts">
+import AppIcon from './AppIcon.vue'
 import { useI18n } from '../../composables/useI18n'
 
-defineProps<{
-  title?: string
-  description?: string
-}>()
+withDefaults(
+  defineProps<{
+    title?: string
+    description?: string
+    icon?: string
+  }>(),
+  {
+    icon: 'layers',
+  },
+)
 
 const { t } = useI18n()
 </script>
@@ -12,57 +19,71 @@ const { t } = useI18n()
 <template>
   <div class="empty-state">
     <div class="empty-mark" aria-hidden="true">
-      <span />
+      <AppIcon :name="icon" :size="22" />
     </div>
-    <div>
+    <div class="empty-copy">
       <strong>{{ title || t('common.noData') }}</strong>
       <p v-if="description">{{ description }}</p>
+    </div>
+    <div v-if="$slots.default" class="empty-actions">
+      <slot />
     </div>
   </div>
 </template>
 
 <style scoped>
 .empty-state {
-  min-height: 116px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 14px;
+  min-height: 128px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
   align-items: center;
-  padding: 18px;
-  border: 1px dashed rgba(148, 163, 184, 0.58);
+  padding: 22px;
+  border: 1px solid color-mix(in oklch, var(--primary) 10%, var(--border));
   border-radius: var(--radius);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.84), rgba(248, 250, 252, 0.72)),
+    radial-gradient(120% 140% at 0% 0%, color-mix(in oklch, var(--primary) 5%, transparent), transparent 60%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.74)),
     var(--card);
   color: var(--muted-foreground);
 }
 
 .empty-mark {
-  width: 38px;
-  height: 38px;
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
-  border-radius: var(--radius);
-  border: 1px solid rgba(190, 202, 216, 0.78);
-  background: rgba(255, 255, 255, 0.78);
+  border-radius: 14px;
+  color: var(--primary);
+  border: 1px solid color-mix(in oklch, var(--primary) 22%, transparent);
+  background: color-mix(in oklch, var(--primary) 9%, white);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 8px 18px -12px var(--brand-glow);
 }
 
-.empty-mark span {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  border: 2px solid color-mix(in oklch, var(--primary) 54%, white);
-  box-shadow: 8px 8px 0 color-mix(in oklch, var(--accent) 26%, white);
+.empty-copy {
+  flex: 1;
+  min-width: 180px;
 }
 
-.empty-state strong {
+.empty-copy strong {
   display: block;
   color: var(--foreground);
   font-size: 15px;
+  letter-spacing: -0.01em;
 }
 
-.empty-state p {
-  margin: 4px 0 0;
+.empty-copy p {
+  margin: 5px 0 0;
   line-height: 1.55;
+  font-size: 13px;
+}
+
+.empty-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 </style>

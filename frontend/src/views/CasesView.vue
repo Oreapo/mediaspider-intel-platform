@@ -11,6 +11,7 @@ import {
   updateCase,
 } from '../api/cases'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -529,23 +530,29 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
                 <div class="grid-two">
                   <label class="field">
                     <span>{{ t('cases.type') }}</span>
-                    <select v-model="caseForm.case_type">
-                      <option value="lead_diversion">{{ t('scenario.lead_diversion') }}</option>
-                      <option value="gray_recruitment">{{ t('scenario.gray_recruitment') }}</option>
-                      <option value="fraud_promotion">{{ t('scenario.fraud_promotion') }}</option>
-                      <option value="seller_risk">{{ t('scenario.seller_risk') }}</option>
-                      <option value="product_risk">{{ t('scenario.product_risk') }}</option>
-                      <option value="topic_watch">{{ t('scenario.topic_watch') }}</option>
-                    </select>
+                    <AppSelect
+                      v-model="caseForm.case_type"
+                      :options="[
+                        { value: 'lead_diversion', label: t('scenario.lead_diversion') },
+                        { value: 'gray_recruitment', label: t('scenario.gray_recruitment') },
+                        { value: 'fraud_promotion', label: t('scenario.fraud_promotion') },
+                        { value: 'seller_risk', label: t('scenario.seller_risk') },
+                        { value: 'product_risk', label: t('scenario.product_risk') },
+                        { value: 'topic_watch', label: t('scenario.topic_watch') },
+                      ]"
+                    />
                   </label>
                   <label class="field">
                     <span>{{ t('cases.priority') }}</span>
-                    <select v-model="caseForm.priority">
-                      <option value="low">{{ t('enum.low') }}</option>
-                      <option value="medium">{{ t('enum.medium') }}</option>
-                      <option value="high">{{ t('enum.high') }}</option>
-                      <option value="critical">{{ t('enum.critical') }}</option>
-                    </select>
+                    <AppSelect
+                      v-model="caseForm.priority"
+                      :options="[
+                        { value: 'low', label: t('enum.low') },
+                        { value: 'medium', label: t('enum.medium') },
+                        { value: 'high', label: t('enum.high') },
+                        { value: 'critical', label: t('enum.critical') },
+                      ]"
+                    />
                   </label>
                 </div>
 
@@ -573,33 +580,38 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
               <form class="case-form" @submit.prevent="submitLink">
                 <label class="field">
                   <span>{{ t('cases.case') }}</span>
-                  <select v-model="linkForm.case_id" required>
-                    <option value="" disabled>{{ t('cases.chooseCase') }}</option>
-                    <option v-for="item in caseItems" :key="item.id" :value="item.id">
-                      {{ item.case_name }} · {{ labelValue(item.status) }}
-                    </option>
-                  </select>
+                  <AppSelect
+                    v-model="linkForm.case_id"
+                    :placeholder="t('cases.chooseCase')"
+                    :options="caseItems.map((item) => ({
+                      value: item.id,
+                      label: `${item.case_name} · ${labelValue(item.status)}`,
+                    }))"
+                  />
                   <FieldError :message="linkErrors.case_id" />
                 </label>
 
                 <div class="grid-two">
                   <label class="field">
                     <span>{{ t('cases.objectType') }}</span>
-                    <select v-model="linkForm.link_type" @change="linkForm.target_id = ''">
-                      <option value="dataset">{{ t('enum.dataset') }}</option>
-                      <option value="signal">{{ t('enum.signal') }}</option>
-                      <option value="entity">{{ t('enum.entity') }}</option>
-                      <option value="analysis_output">{{ t('enum.analysis_output') }}</option>
-                    </select>
+                    <AppSelect
+                      v-model="linkForm.link_type"
+                      :options="[
+                        { value: 'dataset', label: t('enum.dataset') },
+                        { value: 'signal', label: t('enum.signal') },
+                        { value: 'entity', label: t('enum.entity') },
+                        { value: 'analysis_output', label: t('enum.analysis_output') },
+                      ]"
+                      @change="linkForm.target_id = ''"
+                    />
                   </label>
                   <label class="field">
                     <span>{{ t('cases.target') }}</span>
-                    <select v-model="linkForm.target_id" required>
-                      <option value="" disabled>{{ t('cases.chooseObject') }}</option>
-                      <option v-for="item in linkTargets" :key="item.id" :value="item.id">
-                        {{ item.label }}
-                      </option>
-                    </select>
+                    <AppSelect
+                      v-model="linkForm.target_id"
+                      :placeholder="t('cases.chooseObject')"
+                      :options="linkTargets.map((item) => ({ value: item.id, label: item.label }))"
+                    />
                     <FieldError :message="linkErrors.target_id" />
                   </label>
                 </div>
@@ -628,12 +640,11 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
                 <div class="grid-two">
                   <label class="field">
                     <span>{{ t('cases.case') }}</span>
-                    <select v-model="noteForm.case_id" required>
-                      <option value="" disabled>{{ t('cases.chooseCase') }}</option>
-                      <option v-for="item in caseItems" :key="item.id" :value="item.id">
-                        {{ item.case_name }}
-                      </option>
-                    </select>
+                    <AppSelect
+                      v-model="noteForm.case_id"
+                      :placeholder="t('cases.chooseCase')"
+                      :options="caseItems.map((item) => ({ value: item.id, label: item.case_name }))"
+                    />
                     <FieldError :message="noteErrors.case_id" />
                   </label>
                   <label class="field">
@@ -711,32 +722,41 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
 
         <label class="field">
           <span>{{ t('tasks.status') }}</span>
-          <select v-model="filters.status">
-            <option value="">{{ t('signals.allStatuses') }}</option>
-            <option value="open">{{ t('enum.open') }}</option>
-            <option value="investigating">{{ t('enum.investigating') }}</option>
-            <option value="ready_for_evidence">{{ t('enum.ready_for_evidence') }}</option>
-            <option value="closed">{{ t('enum.closed') }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.status"
+            :options="[
+              { value: '', label: t('signals.allStatuses') },
+              { value: 'open', label: t('enum.open') },
+              { value: 'investigating', label: t('enum.investigating') },
+              { value: 'ready_for_evidence', label: t('enum.ready_for_evidence') },
+              { value: 'closed', label: t('enum.closed') },
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('cases.priority') }}</span>
-          <select v-model="filters.priority">
-            <option value="">{{ t('cases.allPriorities') }}</option>
-            <option value="critical">{{ t('enum.critical') }}</option>
-            <option value="high">{{ t('enum.high') }}</option>
-            <option value="medium">{{ t('enum.medium') }}</option>
-            <option value="low">{{ t('enum.low') }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.priority"
+            :options="[
+              { value: '', label: t('cases.allPriorities') },
+              { value: 'critical', label: t('enum.critical') },
+              { value: 'high', label: t('enum.high') },
+              { value: 'medium', label: t('enum.medium') },
+              { value: 'low', label: t('enum.low') },
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('cases.type') }}</span>
-          <select v-model="filters.case_type">
-            <option value="">{{ t('signals.allTypes') }}</option>
-            <option v-for="item in caseTypes" :key="item" :value="item">{{ scenarioLabel(item) }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.case_type"
+            :options="[
+              { value: '', label: t('signals.allTypes') },
+              ...caseTypes.map((item) => ({ value: item, label: scenarioLabel(item) })),
+            ]"
+          />
         </label>
 
         <label class="field">
@@ -1032,8 +1052,14 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
 }
 
 .filter-form {
-  grid-template-columns: 1.4fr repeat(5, minmax(0, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: end;
+}
+
+.filter-form .field {
+  flex: 1 1 158px;
+  min-width: 150px;
 }
 
 .mini-grid span {
@@ -1087,7 +1113,7 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
   height: 12px;
   border: 2px solid #ffffff;
   border-radius: 50%;
-  background: #0f766e;
+  background: var(--primary);
   box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.3);
   content: '';
 }
@@ -1120,7 +1146,7 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
 .status-arrow {
   display: inline;
   padding: 0 6px;
-  color: #0f766e;
+  color: var(--primary);
 }
 
 .evidence-tree {
@@ -1169,7 +1195,7 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
   border-radius: 999px;
   padding: 4px 8px;
   background: rgba(15, 118, 110, 0.1);
-  color: #0f766e;
+  color: var(--primary);
   font-size: 12px;
   font-weight: 800;
 }
@@ -1328,7 +1354,7 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

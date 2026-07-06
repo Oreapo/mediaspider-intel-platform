@@ -725,11 +725,11 @@ onUnmounted(clearRunPolling)
 }
 
 .run-progress progress::-webkit-progress-value {
-  background: #0f766e;
+  background: var(--primary);
 }
 
 .run-progress progress::-moz-progress-bar {
-  background: #0f766e;
+  background: var(--primary);
 }
 
 .failure-diagnosis {
@@ -839,7 +839,7 @@ th {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

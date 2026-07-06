@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { createSignal, deleteSignal, extractSignals, listSignalClusters, updateSignalStatus, type SignalCluster } from '../api/signals'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -292,12 +293,14 @@ function statusTone(status: string) {
         <form class="signal-form" @submit.prevent="submitExtraction">
           <label class="field">
             <span>{{ t('signals.dataset') }}</span>
-            <select v-model="extractionForm.dataset_id" required>
-              <option value="" disabled>{{ t('signals.chooseDataset') }}</option>
-              <option v-for="item in datasetItems" :key="item.id" :value="item.id">
-                {{ item.dataset_name }} · {{ item.source_platform }} · {{ datasetScenarioLabel(item.scenario_type) }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="extractionForm.dataset_id"
+              :placeholder="t('signals.chooseDataset')"
+              :options="datasetItems.map((item) => ({
+                value: item.id,
+                label: `${item.dataset_name} · ${item.source_platform} · ${datasetScenarioLabel(item.scenario_type)}`,
+              }))"
+            />
             <FieldError :message="extractionErrors.dataset_id" />
           </label>
 
@@ -331,24 +334,29 @@ function statusTone(status: string) {
         <form class="signal-form" @submit.prevent="submitManualSignal">
           <label class="field">
             <span>{{ t('signals.dataset') }}</span>
-            <select v-model="manualForm.dataset_id" required>
-              <option value="" disabled>{{ t('signals.chooseDataset') }}</option>
-              <option v-for="item in datasetItems" :key="item.id" :value="item.id">
-                {{ item.dataset_name }} · {{ item.source_platform }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="manualForm.dataset_id"
+              :placeholder="t('signals.chooseDataset')"
+              :options="datasetItems.map((item) => ({
+                value: item.id,
+                label: `${item.dataset_name} · ${item.source_platform}`,
+              }))"
+            />
             <FieldError :message="manualErrors.dataset_id" />
           </label>
 
           <div class="grid-two">
             <label class="field">
               <span>{{ t('signals.riskLevel') }}</span>
-              <select v-model="manualForm.risk_level">
-                <option value="low">{{ t('enum.low') }}</option>
-                <option value="medium">{{ t('enum.medium') }}</option>
-                <option value="high">{{ t('enum.high') }}</option>
-                <option value="critical">{{ t('enum.critical') }}</option>
-              </select>
+              <AppSelect
+                v-model="manualForm.risk_level"
+                :options="[
+                  { value: 'low', label: t('enum.low') },
+                  { value: 'medium', label: t('enum.medium') },
+                  { value: 'high', label: t('enum.high') },
+                  { value: 'critical', label: t('enum.critical') },
+                ]"
+              />
             </label>
             <label class="field">
               <span>{{ t('signals.riskScore') }}</span>
@@ -385,42 +393,52 @@ function statusTone(status: string) {
 
         <label class="field">
           <span>{{ t('signals.dataset') }}</span>
-          <select v-model="filters.dataset_id">
-            <option value="">{{ t('signals.allDatasets') }}</option>
-            <option v-for="item in datasetItems" :key="item.id" :value="item.id">
-              {{ item.dataset_name }} · {{ item.source_platform }}
-            </option>
-          </select>
+          <AppSelect
+            v-model="filters.dataset_id"
+            :options="[
+              { value: '', label: t('signals.allDatasets') },
+              ...datasetItems.map((item) => ({ value: item.id, label: `${item.dataset_name} · ${item.source_platform}` })),
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('tasks.status') }}</span>
-          <select v-model="filters.status">
-            <option value="">{{ t('signals.allStatuses') }}</option>
-            <option value="new">{{ t('enum.new') }}</option>
-            <option value="reviewing">{{ t('enum.reviewing') }}</option>
-            <option value="confirmed">{{ t('enum.confirmed') }}</option>
-            <option value="dismissed">{{ t('enum.dismissed') }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.status"
+            :options="[
+              { value: '', label: t('signals.allStatuses') },
+              { value: 'new', label: t('enum.new') },
+              { value: 'reviewing', label: t('enum.reviewing') },
+              { value: 'confirmed', label: t('enum.confirmed') },
+              { value: 'dismissed', label: t('enum.dismissed') },
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('signals.risk') }}</span>
-          <select v-model="filters.risk_level">
-            <option value="">{{ t('signals.allRisks') }}</option>
-            <option value="critical">{{ t('enum.critical') }}</option>
-            <option value="high">{{ t('enum.high') }}</option>
-            <option value="medium">{{ t('enum.medium') }}</option>
-            <option value="low">{{ t('enum.low') }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.risk_level"
+            :options="[
+              { value: '', label: t('signals.allRisks') },
+              { value: 'critical', label: t('enum.critical') },
+              { value: 'high', label: t('enum.high') },
+              { value: 'medium', label: t('enum.medium') },
+              { value: 'low', label: t('enum.low') },
+            ]"
+          />
         </label>
 
         <label class="field">
           <span>{{ t('signals.type') }}</span>
-          <select v-model="filters.signal_type">
-            <option value="">{{ t('signals.allTypes') }}</option>
-            <option v-for="item in signalTypes" :key="item" :value="item">{{ item }}</option>
-          </select>
+          <AppSelect
+            v-model="filters.signal_type"
+            :options="[
+              { value: '', label: t('signals.allTypes') },
+              ...signalTypes.map((item) => ({ value: item, label: item })),
+            ]"
+          />
         </label>
 
         <label class="field">
@@ -626,8 +644,14 @@ function statusTone(status: string) {
 }
 
 .filter-form {
-  grid-template-columns: 1.4fr repeat(5, minmax(0, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: end;
+}
+
+.filter-form .field {
+  flex: 1 1 158px;
+  min-width: 150px;
 }
 
 .field {
@@ -742,7 +766,7 @@ function statusTone(status: string) {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

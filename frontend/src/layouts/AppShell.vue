@@ -187,7 +187,7 @@ const pageMeta = computed(() => {
 }
 
 .sidebar-metric strong {
-  color: #0f766e;
+  color: var(--primary);
   font-size: 12px;
 }
 
@@ -219,7 +219,7 @@ const pageMeta = computed(() => {
   position: absolute;
   inset: 0 auto 0 0;
   width: 5px;
-  background: linear-gradient(180deg, var(--primary), var(--accent));
+  background: linear-gradient(180deg, var(--primary), var(--primary-strong));
 }
 
 .page-title {

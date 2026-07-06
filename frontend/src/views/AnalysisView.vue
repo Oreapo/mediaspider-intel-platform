@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { createAnalysisJob, getAnalysisOutputs } from '../api/analysis'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -168,22 +169,27 @@ function scopeLabel(value: string) {
               <div class="grid-two">
                 <label class="field">
                   <span>{{ t('analysis.dataset') }}</span>
-                  <select v-model="form.dataset_id" required>
-                    <option value="" disabled>{{ t('analysis.selectDataset') }}</option>
-                    <option v-for="item in datasetItems" :key="item.id" :value="item.id">
-                      {{ item.dataset_name }} · {{ item.source_platform }}
-                    </option>
-                  </select>
+                  <AppSelect
+                    v-model="form.dataset_id"
+                    :placeholder="t('analysis.selectDataset')"
+                    :options="datasetItems.map((item) => ({
+                      value: item.id,
+                      label: `${item.dataset_name} · ${item.source_platform}`,
+                    }))"
+                  />
                   <FieldError :message="fieldErrors.dataset_id" />
                 </label>
 
                 <label class="field">
                   <span>{{ t('analysis.scope') }}</span>
-                  <select v-model="form.analysis_scope">
-                    <option value="common">{{ t('analysisScope.common') }}</option>
-                    <option value="platform">{{ t('analysisScope.platform') }}</option>
-                    <option value="cross_platform">{{ t('analysisScope.cross_platform') }}</option>
-                  </select>
+                  <AppSelect
+                    v-model="form.analysis_scope"
+                    :options="[
+                      { value: 'common', label: t('analysisScope.common') },
+                      { value: 'platform', label: t('analysisScope.platform') },
+                      { value: 'cross_platform', label: t('analysisScope.cross_platform') },
+                    ]"
+                  />
                 </label>
               </div>
 
@@ -480,7 +486,7 @@ function scopeLabel(value: string) {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

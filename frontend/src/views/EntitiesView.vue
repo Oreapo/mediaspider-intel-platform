@@ -10,6 +10,7 @@ import {
   updateEntityStatus,
 } from '../api/entities'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -437,27 +438,32 @@ function entityStatusTone(status: string) {
               <form class="entity-form" @submit.prevent="submitFromSignal">
                 <label class="field">
                   <span>{{ t('entities.confirmedSignal') }}</span>
-                  <select v-model="fromSignalForm.signal_id" required>
-                    <option value="" disabled>{{ t('entities.chooseConfirmedSignal') }}</option>
-                    <option v-for="item in confirmedSignals" :key="item.id" :value="item.id">
-                      {{ item.summary }} · {{ sourceRef(item).row_index ?? '-' }}
-                    </option>
-                  </select>
+                  <AppSelect
+                    v-model="fromSignalForm.signal_id"
+                    :placeholder="t('entities.chooseConfirmedSignal')"
+                    :options="confirmedSignals.map((item) => ({
+                      value: item.id,
+                      label: `${item.summary} · ${sourceRef(item).row_index ?? '-'}`,
+                    }))"
+                  />
                   <FieldError :message="fromSignalErrors.signal_id" />
                 </label>
 
                 <div class="grid-two">
                   <label class="field">
                     <span>{{ t('entities.entityType') }}</span>
-                    <select v-model="fromSignalForm.entity_type">
-                      <option value="">auto</option>
-                      <option value="account">account</option>
-                      <option value="seller">seller</option>
-                      <option value="product">product</option>
-                      <option value="content">content</option>
-                      <option value="contact_point">contact_point</option>
-                      <option value="alias">alias</option>
-                    </select>
+                    <AppSelect
+                      v-model="fromSignalForm.entity_type"
+                      :options="[
+                        { value: '', label: 'auto' },
+                        { value: 'account', label: 'account' },
+                        { value: 'seller', label: 'seller' },
+                        { value: 'product', label: 'product' },
+                        { value: 'content', label: 'content' },
+                        { value: 'contact_point', label: 'contact_point' },
+                        { value: 'alias', label: 'alias' },
+                      ]"
+                    />
                   </label>
                   <label class="field">
                     <span>{{ t('entities.displayName') }}</span>
@@ -480,26 +486,29 @@ function entityStatusTone(status: string) {
                 <div class="grid-two">
                   <label class="field">
                     <span>{{ t('entities.entityType') }}</span>
-                    <select v-model="manualForm.entity_type">
-                      <option value="account">account</option>
-                      <option value="seller">seller</option>
-                      <option value="product">product</option>
-                      <option value="content">content</option>
-                      <option value="contact_point">contact_point</option>
-                      <option value="alias">alias</option>
-                      <option value="unknown">unknown</option>
-                    </select>
+                    <AppSelect
+                      v-model="manualForm.entity_type"
+                      :options="[
+                        { value: 'account', label: 'account' },
+                        { value: 'seller', label: 'seller' },
+                        { value: 'product', label: 'product' },
+                        { value: 'content', label: 'content' },
+                        { value: 'contact_point', label: 'contact_point' },
+                        { value: 'alias', label: 'alias' },
+                        { value: 'unknown', label: 'unknown' },
+                      ]"
+                    />
                   </label>
                   <label class="field">
                     <span>{{ t('entities.platform') }}</span>
-                    <div class="select-with-icon">
-                      <PlatformLogo :platform="manualForm.platform" :size="18" class="select-icon" />
-                      <select v-model="manualForm.platform">
-                        <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                          {{ labelValue(item.platform) }}
-                        </option>
-                      </select>
-                    </div>
+                    <AppSelect
+                      v-model="manualForm.platform"
+                      :options="platformItems.map((item) => ({
+                        value: item.platform,
+                        label: labelValue(item.platform),
+                        platform: item.platform,
+                      }))"
+                    />
                   </label>
                 </div>
 
@@ -534,22 +543,26 @@ function entityStatusTone(status: string) {
                 <div class="grid-two">
                   <label class="field">
                     <span>{{ t('entities.source') }}</span>
-                    <select v-model="relationForm.source_entity_id" required>
-                      <option value="" disabled>{{ t('entities.chooseSource') }}</option>
-                      <option v-for="item in entityItems" :key="item.id" :value="item.id">
-                        {{ item.display_name }} · {{ labelValue(item.entity_type) }}
-                      </option>
-                    </select>
+                    <AppSelect
+                      v-model="relationForm.source_entity_id"
+                      :placeholder="t('entities.chooseSource')"
+                      :options="entityItems.map((item) => ({
+                        value: item.id,
+                        label: `${item.display_name} · ${labelValue(item.entity_type)}`,
+                      }))"
+                    />
                     <FieldError :message="relationErrors.source_entity_id" />
                   </label>
                   <label class="field">
                     <span>{{ t('entities.target') }}</span>
-                    <select v-model="relationForm.target_entity_id" required>
-                      <option value="" disabled>{{ t('entities.chooseTarget') }}</option>
-                      <option v-for="item in entityItems" :key="item.id" :value="item.id">
-                        {{ item.display_name }} · {{ labelValue(item.entity_type) }}
-                      </option>
-                    </select>
+                    <AppSelect
+                      v-model="relationForm.target_entity_id"
+                      :placeholder="t('entities.chooseTarget')"
+                      :options="entityItems.map((item) => ({
+                        value: item.id,
+                        label: `${item.display_name} · ${labelValue(item.entity_type)}`,
+                      }))"
+                    />
                     <FieldError :message="relationErrors.target_entity_id" />
                   </label>
                 </div>
@@ -585,22 +598,20 @@ function entityStatusTone(status: string) {
                 <div class="grid-two">
                   <label class="field">
                     <span>{{ t('entities.mergeSource') }}</span>
-                    <select v-model="mergeForm.source_entity_id" required>
-                      <option value="" disabled>{{ t('entities.chooseMergedSource') }}</option>
-                      <option v-for="item in entityItems" :key="item.id" :value="item.id">
-                        {{ item.display_name }}
-                      </option>
-                    </select>
+                    <AppSelect
+                      v-model="mergeForm.source_entity_id"
+                      :placeholder="t('entities.chooseMergedSource')"
+                      :options="entityItems.map((item) => ({ value: item.id, label: item.display_name }))"
+                    />
                     <FieldError :message="mergeErrors.source_entity_id" />
                   </label>
                   <label class="field">
                     <span>{{ t('entities.mergeTo') }}</span>
-                    <select v-model="mergeForm.target_entity_id" required>
-                      <option value="" disabled>{{ t('entities.chooseTarget') }}</option>
-                      <option v-for="item in entityItems" :key="item.id" :value="item.id">
-                        {{ item.display_name }}
-                      </option>
-                    </select>
+                    <AppSelect
+                      v-model="mergeForm.target_entity_id"
+                      :placeholder="t('entities.chooseTarget')"
+                      :options="entityItems.map((item) => ({ value: item.id, label: item.display_name }))"
+                    />
                     <FieldError :message="mergeErrors.target_entity_id" />
                   </label>
                 </div>
@@ -628,33 +639,37 @@ function entityStatusTone(status: string) {
 
           <label class="field">
             <span>{{ t('entities.platform') }}</span>
-            <div class="select-with-icon">
-              <PlatformLogo v-if="filters.platform" :platform="filters.platform" :size="18" class="select-icon" />
-              <select v-model="filters.platform" :class="{ 'no-icon': !filters.platform }">
-                <option value="">{{ t('entities.allPlatforms') }}</option>
-                <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                  {{ labelValue(item.platform) }}
-                </option>
-              </select>
-            </div>
+            <AppSelect
+              v-model="filters.platform"
+              :options="[
+                { value: '', label: t('entities.allPlatforms') },
+                ...platformItems.map((item) => ({ value: item.platform, label: labelValue(item.platform), platform: item.platform })),
+              ]"
+            />
           </label>
 
           <label class="field">
             <span>{{ t('signals.type') }}</span>
-            <select v-model="filters.entity_type">
-              <option value="">{{ t('entities.allTypes') }}</option>
-              <option v-for="item in entityTypes" :key="item" :value="item">{{ item }}</option>
-            </select>
+            <AppSelect
+              v-model="filters.entity_type"
+              :options="[
+                { value: '', label: t('entities.allTypes') },
+                ...entityTypes.map((item) => ({ value: item, label: item })),
+              ]"
+            />
           </label>
 
           <label class="field">
             <span>{{ t('tasks.status') }}</span>
-            <select v-model="filters.status">
-              <option value="">{{ t('signals.allStatuses') }}</option>
-              <option value="active">{{ t('enum.active') }}</option>
-              <option value="merged">{{ t('enum.merged') }}</option>
-              <option value="dismissed">{{ t('enum.dismissed') }}</option>
-            </select>
+            <AppSelect
+              v-model="filters.status"
+              :options="[
+                { value: '', label: t('signals.allStatuses') },
+                { value: 'active', label: t('enum.active') },
+                { value: 'merged', label: t('enum.merged') },
+                { value: 'dismissed', label: t('enum.dismissed') },
+              ]"
+            />
           </label>
 
           <label class="field">
@@ -907,9 +922,15 @@ function entityStatusTone(status: string) {
 }
 
 .filter-form {
-  grid-template-columns: 1.3fr repeat(5, minmax(0, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: end;
   margin-bottom: 18px;
+}
+
+.filter-form .field {
+  flex: 1 1 158px;
+  min-width: 150px;
 }
 
 .field {
@@ -929,27 +950,6 @@ function entityStatusTone(status: string) {
   border-radius: 14px;
   border: 1px solid rgba(203, 213, 225, 0.95);
   background: rgba(255, 255, 255, 0.94);
-}
-
-.select-with-icon {
-  position: relative;
-}
-
-.select-with-icon .select-icon {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #0f766e;
-  pointer-events: none;
-}
-
-.select-with-icon select {
-  padding-left: 38px;
-}
-
-.select-with-icon select.no-icon {
-  padding-left: 14px;
 }
 
 .platform-line {
@@ -1039,7 +1039,7 @@ function entityStatusTone(status: string) {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

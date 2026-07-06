@@ -97,7 +97,7 @@ const displayRetryLabel = computed(() => props.retryLabel || t('common.retry'))
 
 .primary-button {
   color: white;
-  background: linear-gradient(135deg, var(--primary-strong), color-mix(in oklch, var(--accent) 68%, var(--primary)));
+  background: linear-gradient(135deg, var(--primary-strong), var(--primary));
 }
 
 .secondary-button {

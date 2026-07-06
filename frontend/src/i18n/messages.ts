@@ -9,9 +9,9 @@ export const localeOptions: Array<{ value: Locale; label: string }> = [
 
 export const messages: Record<Locale, Record<string, string>> = {
   'zh-CN': {
-    'app.name': 'MediaSpider',
-    'app.subtitle': '情报分析平台',
-    'app.documentTitle': 'MediaSpider 情报平台',
+    'app.name': '网络风险情报',
+    'app.subtitle': '数字取证 · 反黑灰产平台',
+    'app.documentTitle': '网络风险情报 · 数字取证平台',
     'header.opsCode': 'OPS / CN',
     'header.backendChecking': '正在检查后端服务',
     'header.backendReady': '后端服务已就绪',
@@ -1152,9 +1152,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     'scenario.topic_watch': '主题监测',
   },
   'en-US': {
-    'app.name': 'MediaSpider',
-    'app.subtitle': 'Intelligence Platform',
-    'app.documentTitle': 'MediaSpider Intelligence Platform',
+    'app.name': 'Cyber Risk Intelligence',
+    'app.subtitle': 'Digital Forensics · Anti-Fraud Platform',
+    'app.documentTitle': 'Cyber Risk Intelligence · Digital Forensics',
     'header.opsCode': 'OPS / EN',
     'header.backendChecking': 'Checking backend',
     'header.backendReady': 'Backend ready',

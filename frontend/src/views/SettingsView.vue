@@ -16,6 +16,7 @@ import {
   updateNotificationRule,
 } from '../api/notifications'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import FieldError from '../components/ui/FieldError.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
@@ -456,23 +457,23 @@ async function moveInboxPage(offset: number) {
           <div class="grid-two">
             <label class="field">
               <span>{{ t('settings.profile.platform') }}</span>
-              <div class="select-with-icon">
-                <PlatformLogo :platform="profileForm.platform" :size="18" class="select-icon" />
-                <select v-model="profileForm.platform" :disabled="platformModelsLoading && !profilePlatformOptions.length">
-                  <option v-for="item in profilePlatformOptions" :key="item.value" :value="item.value">
-                    {{ item.label }}
-                  </option>
-                </select>
-              </div>
+              <AppSelect
+                v-model="profileForm.platform"
+                :disabled="platformModelsLoading && !profilePlatformOptions.length"
+                :options="profilePlatformOptions.map((option) => ({ ...option, platform: String(option.value) }))"
+              />
               <FieldError :message="profileErrors.platform" />
             </label>
             <label class="field">
               <span>{{ t('settings.profile.authType') }}</span>
-              <select v-model="profileForm.auth_type">
-                <option value="cookie">cookie</option>
-                <option value="qrcode">qrcode</option>
-                <option value="phone">phone</option>
-              </select>
+              <AppSelect
+                v-model="profileForm.auth_type"
+                :options="[
+                  { value: 'cookie', label: 'cookie' },
+                  { value: 'qrcode', label: 'qrcode' },
+                  { value: 'phone', label: 'phone' },
+                ]"
+              />
             </label>
           </div>
 
@@ -521,12 +522,15 @@ async function moveInboxPage(offset: number) {
           <div class="grid-two">
             <label class="field">
               <span>{{ t('settings.rule.riskThreshold') }}</span>
-              <select v-model="form.risk_level_threshold">
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="critical">critical</option>
-              </select>
+              <AppSelect
+                v-model="form.risk_level_threshold"
+                :options="[
+                  { value: 'low', label: 'low' },
+                  { value: 'medium', label: 'medium' },
+                  { value: 'high', label: 'high' },
+                  { value: 'critical', label: 'critical' },
+                ]"
+              />
             </label>
             <label class="field">
               <span>{{ t('settings.rule.cron') }}</span>
@@ -783,25 +787,34 @@ async function moveInboxPage(offset: number) {
 
         <form class="filter-bar" @submit.prevent="applyDeliveryFilters">
           <input v-model="deliveryFilters.q" :placeholder="t('settings.delivery.searchPlaceholder')" />
-          <select v-model="deliveryFilters.status">
-            <option value="">{{ t('settings.delivery.allStatuses') }}</option>
-            <option value="sent">{{ t('enum.sent') }}</option>
-            <option value="failed">{{ t('enum.failed') }}</option>
-            <option value="skipped">{{ t('enum.skipped') }}</option>
-          </select>
-          <select v-model="deliveryFilters.channel">
-            <option value="">{{ t('settings.delivery.allChannels') }}</option>
-            <option value="internal_inbox">internal_inbox</option>
-            <option value="email">email</option>
-            <option value="webhook">webhook</option>
-          </select>
-          <select v-model="deliveryFilters.target_type">
-            <option value="">{{ t('settings.delivery.allTargets') }}</option>
-            <option value="signal">signal</option>
-            <option value="case">case</option>
-            <option value="evidence_packet">evidence_packet</option>
-            <option value="scheduled_digest">scheduled_digest</option>
-          </select>
+          <AppSelect
+            v-model="deliveryFilters.status"
+            :options="[
+              { value: '', label: t('settings.delivery.allStatuses') },
+              { value: 'sent', label: t('enum.sent') },
+              { value: 'failed', label: t('enum.failed') },
+              { value: 'skipped', label: t('enum.skipped') },
+            ]"
+          />
+          <AppSelect
+            v-model="deliveryFilters.channel"
+            :options="[
+              { value: '', label: t('settings.delivery.allChannels') },
+              { value: 'internal_inbox', label: 'internal_inbox' },
+              { value: 'email', label: 'email' },
+              { value: 'webhook', label: 'webhook' },
+            ]"
+          />
+          <AppSelect
+            v-model="deliveryFilters.target_type"
+            :options="[
+              { value: '', label: t('settings.delivery.allTargets') },
+              { value: 'signal', label: 'signal' },
+              { value: 'case', label: 'case' },
+              { value: 'evidence_packet', label: 'evidence_packet' },
+              { value: 'scheduled_digest', label: 'scheduled_digest' },
+            ]"
+          />
           <button class="secondary-button" :disabled="busy" type="submit">{{ t('common.filter') }}</button>
           <button class="secondary-button" :disabled="busy" type="button" @click="resetDeliveryFilters">{{ t('common.reset') }}</button>
         </form>
@@ -1015,23 +1028,6 @@ async function moveInboxPage(offset: number) {
   min-height: 86px;
 }
 
-.select-with-icon {
-  position: relative;
-}
-
-.select-with-icon .select-icon {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #0f766e;
-  pointer-events: none;
-}
-
-.select-with-icon select {
-  padding-left: 38px;
-}
-
 .platform-line {
   display: inline-flex;
   align-items: center;
@@ -1145,7 +1141,7 @@ async function moveInboxPage(offset: number) {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

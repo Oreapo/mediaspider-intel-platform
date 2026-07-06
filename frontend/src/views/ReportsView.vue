@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { deleteReport, downloadReport, generateReport, updateReport } from '../api/reports'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -224,22 +225,27 @@ function reportSignalCount(report: Report) {
         <div class="grid-two">
           <label class="field">
             <span>{{ t('cases.case') }}</span>
-            <select v-model="form.case_id" required>
-              <option value="" disabled>{{ t('cases.chooseCase') }}</option>
-              <option v-for="item in caseItems" :key="item.id" :value="item.id">
-                {{ item.case_name }} · {{ scenarioLabel(item.case_type) }} · {{ labelValue(item.priority) }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="form.case_id"
+              :placeholder="t('cases.chooseCase')"
+              :options="caseItems.map((item) => ({
+                value: item.id,
+                label: `${item.case_name} · ${scenarioLabel(item.case_type)} · ${labelValue(item.priority)}`,
+              }))"
+            />
             <FieldError :message="formErrors.case_id" />
           </label>
 
           <label class="field">
             <span>{{ t('reports.type') }}</span>
-            <select v-model="form.report_type">
-              <option value="investigation_brief">{{ t('reportType.investigation_brief') }}</option>
-              <option value="case_summary">{{ t('reportType.case_summary') }}</option>
-              <option value="evidence_review">{{ t('reportType.evidence_review') }}</option>
-            </select>
+            <AppSelect
+              v-model="form.report_type"
+              :options="[
+                { value: 'investigation_brief', label: t('reportType.investigation_brief') },
+                { value: 'case_summary', label: t('reportType.case_summary') },
+                { value: 'evidence_review', label: t('reportType.evidence_review') },
+              ]"
+            />
           </label>
         </div>
 
@@ -322,11 +328,14 @@ function reportSignalCount(report: Report) {
             </label>
             <label class="field">
               <span>{{ t('reports.status') }}</span>
-              <select v-model="editorForm.status">
-                <option value="draft">{{ t('enum.draft') }}</option>
-                <option value="generated">{{ t('enum.generated') }}</option>
-                <option value="archived">{{ t('enum.archived') }}</option>
-              </select>
+              <AppSelect
+                v-model="editorForm.status"
+                :options="[
+                  { value: 'draft', label: t('enum.draft') },
+                  { value: 'generated', label: t('enum.generated') },
+                  { value: 'archived', label: t('enum.archived') },
+                ]"
+              />
             </label>
           </div>
           <label class="field">
@@ -531,7 +540,7 @@ function reportSignalCount(report: Report) {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

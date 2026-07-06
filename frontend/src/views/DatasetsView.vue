@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { createDataset, deleteDataset, previewDataset } from '../api/datasets'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -226,34 +227,33 @@ function datasetTypeLabel(value: string) {
 
           <label class="field">
             <span>{{ t('datasets.sourcePlatform') }}</span>
-            <div class="select-with-icon">
-              <PlatformLogo :platform="form.source_platform" :size="18" class="select-icon" />
-              <select v-model="form.source_platform">
-                <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                  {{ labelValue(item.platform) }}
-                </option>
-              </select>
-            </div>
+            <AppSelect
+              v-model="form.source_platform"
+              :options="platformItems.map((item) => ({
+                value: item.platform,
+                label: labelValue(item.platform),
+                platform: item.platform,
+              }))"
+            />
           </label>
         </div>
 
         <div class="grid-two">
           <label class="field">
             <span>{{ t('datasets.type') }}</span>
-            <select v-model="form.dataset_type">
-              <option value="raw">{{ t('datasetType.raw') }}</option>
-              <option value="normalized">{{ t('datasetType.normalized') }}</option>
-              <option value="analysis_ready">{{ t('datasetType.analysis_ready') }}</option>
-            </select>
+            <AppSelect
+              v-model="form.dataset_type"
+              :options="[
+                { value: 'raw', label: t('datasetType.raw') },
+                { value: 'normalized', label: t('datasetType.normalized') },
+                { value: 'analysis_ready', label: t('datasetType.analysis_ready') },
+              ]"
+            />
           </label>
 
           <label class="field">
             <span>{{ t('tasks.scenario') }}</span>
-            <select v-model="form.scenario_type">
-              <option v-for="item in scenarioOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
+            <AppSelect v-model="form.scenario_type" :options="scenarioOptions" />
           </label>
         </div>
 
@@ -296,33 +296,32 @@ function datasetTypeLabel(value: string) {
 
           <label class="field">
             <span>{{ t('tasks.platform') }}</span>
-            <div class="select-with-icon">
-              <PlatformLogo v-if="filters.source_platform" :platform="filters.source_platform" :size="18" class="select-icon" />
-              <select v-model="filters.source_platform" :class="{ 'no-icon': !filters.source_platform }">
-                <option value="">{{ t('tasks.allPlatforms') }}</option>
-                <option v-for="item in platformItems" :key="item.platform" :value="item.platform">
-                  {{ labelValue(item.platform) }}
-                </option>
-              </select>
-            </div>
+            <AppSelect
+              v-model="filters.source_platform"
+              :options="[
+                { value: '', label: t('tasks.allPlatforms') },
+                ...platformItems.map((item) => ({ value: item.platform, label: labelValue(item.platform), platform: item.platform })),
+              ]"
+            />
           </label>
 
           <label class="field">
             <span>{{ t('datasets.type') }}</span>
-            <select v-model="filters.dataset_type">
-              <option value="">{{ t('datasets.allTypes') }}</option>
-              <option v-for="item in datasetTypes" :key="item" :value="item">{{ datasetTypeLabel(item) }}</option>
-            </select>
+            <AppSelect
+              v-model="filters.dataset_type"
+              :options="[
+                { value: '', label: t('datasets.allTypes') },
+                ...datasetTypes.map((item) => ({ value: item, label: datasetTypeLabel(item) })),
+              ]"
+            />
           </label>
 
           <label class="field">
             <span>{{ t('tasks.scenario') }}</span>
-            <select v-model="filters.scenario_type">
-              <option value="">{{ t('tasks.allScenarios') }}</option>
-              <option v-for="item in scenarioOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="filters.scenario_type"
+              :options="[{ value: '', label: t('tasks.allScenarios') }, ...scenarioOptions]"
+            />
           </label>
 
           <label class="field">
@@ -487,9 +486,15 @@ function datasetTypeLabel(value: string) {
 }
 
 .filter-form {
-  grid-template-columns: 1.3fr repeat(5, minmax(0, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: end;
   margin-bottom: 18px;
+}
+
+.filter-form .field {
+  flex: 1 1 158px;
+  min-width: 150px;
 }
 
 .field {
@@ -509,27 +514,6 @@ function datasetTypeLabel(value: string) {
   border-radius: 14px;
   border: 1px solid rgba(203, 213, 225, 0.95);
   background: rgba(255, 255, 255, 0.94);
-}
-
-.select-with-icon {
-  position: relative;
-}
-
-.select-with-icon .select-icon {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #0f766e;
-  pointer-events: none;
-}
-
-.select-with-icon select {
-  padding-left: 38px;
-}
-
-.select-with-icon select.no-icon {
-  padding-left: 14px;
 }
 
 .platform-line {
@@ -592,7 +576,7 @@ function datasetTypeLabel(value: string) {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

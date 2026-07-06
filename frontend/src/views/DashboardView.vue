@@ -20,24 +20,28 @@ const stats = computed(() => [
     value: data.value?.summary.high_risk_signal_count ?? 0,
     hint: t('dashboard.highRiskHint'),
     tone: 'high',
+    icon: 'alert',
   },
   {
     label: t('dashboard.openCases'),
     value: data.value?.summary.open_case_count ?? 0,
     hint: t('dashboard.totalCases', { count: data.value?.summary.case_count ?? 0 }),
     tone: 'open',
+    icon: 'briefcase',
   },
   {
     label: t('dashboard.datasets'),
     value: data.value?.summary.dataset_count ?? 0,
     hint: t('dashboard.records', { count: data.value?.summary.record_count ?? 0 }),
     tone: 'datasets',
+    icon: 'layers',
   },
   {
     label: t('dashboard.evidencePacks'),
     value: data.value?.summary.evidence_packet_count ?? 0,
     hint: t('dashboard.exportableMaterials'),
     tone: 'evidence',
+    icon: 'package',
   },
 ])
 
@@ -353,7 +357,12 @@ function donutStyle(rows: Array<{ tone: string; value: number }>, total: number)
 
       <div class="surface kpi-strip">
         <article v-for="stat in stats" :key="stat.label" class="kpi-cell">
-          <span>{{ stat.label }}</span>
+          <div class="kpi-top">
+            <span>{{ stat.label }}</span>
+            <span class="kpi-icon" :style="{ color: chartColor(stat.tone) }">
+              <AppIcon :name="stat.icon" :size="18" />
+            </span>
+          </div>
           <strong>{{ stat.value }}</strong>
           <small>{{ stat.hint }}</small>
           <i :style="{ background: chartColor(stat.tone) }" />
@@ -820,9 +829,9 @@ function donutStyle(rows: Array<{ tone: string; value: number }>, total: number)
   display: grid;
   place-items: center;
   border-radius: var(--radius);
-  border: 1px solid rgba(21, 94, 117, 0.18);
+  border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
   background: rgba(240, 253, 250, 0.92);
-  color: #0f766e;
+  color: var(--primary);
 }
 
 .platform-compare-grid {
@@ -845,7 +854,7 @@ function donutStyle(rows: Array<{ tone: string; value: number }>, total: number)
 
 .platform-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(21, 94, 117, 0.28);
+  border-color: color-mix(in oklch, var(--primary) 28%, transparent);
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
 }
 
@@ -864,7 +873,7 @@ function donutStyle(rows: Array<{ tone: string; value: number }>, total: number)
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(215, 224, 234, 0.86);
-  color: #0f766e;
+  color: var(--primary);
 }
 
 .platform-card-head strong {
@@ -954,26 +963,49 @@ function donutStyle(rows: Array<{ tone: string; value: number }>, total: number)
 
 .kpi-cell {
   position: relative;
-  min-height: 116px;
+  min-height: 128px;
   padding: 18px 20px 16px;
   display: grid;
   align-content: space-between;
-  gap: 10px;
+  gap: 12px;
   border-right: 1px solid rgba(215, 224, 234, 0.72);
+  transition: background 200ms ease;
+}
+
+.kpi-cell:hover {
+  background: color-mix(in oklch, var(--primary) 3%, transparent);
 }
 
 .kpi-cell:last-child {
   border-right: 0;
 }
 
-.kpi-cell span,
+.kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kpi-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: color-mix(in oklch, currentColor 13%, white);
+  border: 1px solid color-mix(in oklch, currentColor 26%, transparent);
+}
+
 .kpi-cell small {
   color: #64748b;
 }
 
-.kpi-cell span {
+.kpi-top span:first-child {
   font-size: 12px;
   font-weight: 800;
+  color: #64748b;
 }
 
 .kpi-cell strong {

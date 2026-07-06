@@ -7,6 +7,7 @@ import {
   getEvidencePacket,
 } from '../api/evidence'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -176,12 +177,14 @@ async function removePacket(packetId: string) {
             <form class="evidence-form" @submit.prevent="submitPacket">
               <label class="field">
                 <span>{{ t('cases.case') }}</span>
-                <select v-model="form.case_id" required>
-                  <option value="" disabled>{{ t('cases.chooseCase') }}</option>
-                  <option v-for="item in caseItems" :key="item.id" :value="item.id">
-                    {{ item.case_name }} · {{ t(`enum.${item.status}`) }} · {{ t(`enum.${item.priority}`) }}
-                  </option>
-                </select>
+                <AppSelect
+                  v-model="form.case_id"
+                  :placeholder="t('cases.chooseCase')"
+                  :options="caseItems.map((item) => ({
+                    value: item.id,
+                    label: `${item.case_name} · ${t(`enum.${item.status}`)} · ${t(`enum.${item.priority}`)}`,
+                  }))"
+                />
                 <FieldError :message="formErrors.case_id" />
               </label>
 
@@ -436,7 +439,7 @@ async function removePacket(packetId: string) {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  background: linear-gradient(135deg, #2563eb 0%, var(--primary) 100%);
   color: white;
 }
 

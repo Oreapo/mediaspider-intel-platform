@@ -4,8 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { fetchHealth } from '../../api/health'
 import { useAuth } from '../../composables/useAuth'
 import { getLocalizedRouteTitle, useI18n } from '../../composables/useI18n'
+import { useTheme } from '../../composables/useTheme'
 import type { Locale } from '../../i18n/messages'
 import { roleLabel } from '../../lib/permissions'
+import AppSelect from '../ui/AppSelect.vue'
 
 type BackendStatus = 'checking' | 'ready' | 'offline'
 
@@ -13,6 +15,7 @@ const route = useRoute()
 const router = useRouter()
 const { signOut, user } = useAuth()
 const { locale, localeOptions, setLocale, t } = useI18n()
+const { theme, themeOptions, setTheme } = useTheme()
 const backendStatus = ref<BackendStatus>('checking')
 let backendHealthTimer: number | undefined
 
@@ -49,9 +52,8 @@ async function logout() {
   await router.replace('/login')
 }
 
-function changeLocale(event: Event) {
-  const nextLocale = (event.target as HTMLSelectElement).value as Locale
-  setLocale(nextLocale)
+function changeLocale(nextLocale: string | number) {
+  setLocale(nextLocale as Locale)
   document.title = getLocalizedRouteTitle(route.meta.titleKey as string | undefined)
 }
 </script>
@@ -59,20 +61,42 @@ function changeLocale(event: Event) {
 <template>
   <header class="header glass">
     <div class="header-brand">
-      <div class="brand-mark">MS</div>
+      <div class="brand-mark">
+        <img
+          :src="theme === 'pink' ? '/brand/logo-pink.png' : '/brand/logo-blue.png'"
+          alt="Digital Forensics"
+        />
+      </div>
       <div>
         <strong>{{ t('app.name') }}</strong>
         <span>{{ t('app.subtitle') }}</span>
       </div>
     </div>
     <div class="header-actions">
+      <div class="theme-toggle" role="group" aria-label="theme">
+        <button
+          v-for="option in themeOptions"
+          :key="option.value"
+          type="button"
+          class="theme-chip"
+          :class="[option.value, { active: theme === option.value }]"
+          :title="option.label"
+          @click="setTheme(option.value)"
+        >
+          <span class="theme-swatch" />
+          {{ option.label }}
+        </button>
+      </div>
       <label class="locale-control">
         <span>{{ t('header.language') }}</span>
-        <select :value="locale" @change="changeLocale">
-          <option v-for="option in localeOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
+        <AppSelect
+          class="locale-select"
+          size="sm"
+          :model-value="locale"
+          :options="localeOptions"
+          :aria-label="t('header.language')"
+          @update:model-value="changeLocale"
+        />
       </label>
       <div class="header-code">{{ t('header.opsCode') }}</div>
       <div v-if="user" class="user-pill">
@@ -94,13 +118,13 @@ function changeLocale(event: Event) {
   top: 0;
   z-index: 50;
   height: 64px;
-  padding: 0 20px;
+  padding: 0 22px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid rgba(215, 224, 234, 0.74);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
+  border-bottom: 1px solid color-mix(in oklch, var(--primary) 12%, var(--border));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 24px -20px var(--brand-glow);
 }
 
 .header-brand {
@@ -110,18 +134,24 @@ function changeLocale(event: Event) {
 }
 
 .brand-mark {
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
-  border-radius: var(--radius);
-  background:
-    linear-gradient(135deg, color-mix(in oklch, var(--primary) 70%, black), var(--accent)),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 800;
-  box-shadow: 0 10px 22px rgba(21, 94, 117, 0.24);
+  overflow: hidden;
+  border-radius: 12px;
+  padding: 3px;
+  background: #fff;
+  border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 12px 24px -10px var(--brand-glow);
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .header-brand strong {
@@ -141,6 +171,55 @@ function changeLocale(event: Event) {
   gap: 12px;
 }
 
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--primary) 16%, var(--border));
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.theme-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px 5px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.theme-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06) inset;
+}
+
+.theme-chip.blue .theme-swatch {
+  background: linear-gradient(135deg, #1e40e6, #6d8bff);
+}
+
+.theme-chip.pink .theme-swatch {
+  background: linear-gradient(135deg, #db2f8e, #f473b6);
+}
+
+.theme-chip.active {
+  color: #fff;
+  background: var(--primary);
+  box-shadow: 0 6px 14px -6px var(--brand-glow);
+}
+
+.theme-chip.active .theme-swatch {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.7) inset;
+}
+
 .header-code {
   padding: 7px 10px;
   border: 1px solid rgba(190, 202, 216, 0.72);
@@ -153,26 +232,17 @@ function changeLocale(event: Event) {
 }
 
 .locale-control {
-  min-height: 34px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
-  border: 1px solid rgba(190, 202, 216, 0.72);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.76);
   color: #64748b;
   font-size: 12px;
   font-weight: 800;
 }
 
-.locale-control select {
-  border: 0;
-  background: transparent;
-  color: #0f172a;
-  font: inherit;
-  outline: none;
-  cursor: pointer;
+.locale-select {
+  width: auto;
+  min-width: 104px;
 }
 
 .status-pill {

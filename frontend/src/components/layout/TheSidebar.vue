@@ -239,9 +239,9 @@ const visibleSecondaryItems = computed(() =>
 }
 
 .nav-btn.active {
-  background: linear-gradient(90deg, rgba(21, 94, 117, 0.14), rgba(15, 118, 110, 0.055));
+  background: linear-gradient(90deg, color-mix(in oklch, var(--primary) 14%, transparent), rgba(15, 118, 110, 0.055));
   color: #0f172a;
-  border-color: rgba(21, 94, 117, 0.18);
+  border-color: color-mix(in oklch, var(--primary) 18%, transparent);
 }
 
 .nav-btn.active::before {
@@ -253,7 +253,7 @@ const visibleSecondaryItems = computed(() =>
   width: 4px;
   height: 24px;
   border-radius: 0 999px 999px 0;
-  background: linear-gradient(180deg, var(--primary), var(--accent));
+  background: linear-gradient(180deg, var(--primary), var(--primary-strong));
 }
 
 .nav-icon {
@@ -269,9 +269,9 @@ const visibleSecondaryItems = computed(() =>
 }
 
 .nav-btn.active .nav-icon {
-  border-color: rgba(21, 94, 117, 0.24);
+  border-color: color-mix(in oklch, var(--primary) 24%, transparent);
   background: rgba(240, 253, 250, 0.92);
-  color: #0f766e;
+  color: var(--primary);
 }
 
 .side-actions {
@@ -309,7 +309,7 @@ const visibleSecondaryItems = computed(() =>
 
 .side-action:hover {
   transform: translateX(2px);
-  border-color: rgba(21, 94, 117, 0.18);
+  border-color: color-mix(in oklch, var(--primary) 18%, transparent);
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -320,7 +320,7 @@ const visibleSecondaryItems = computed(() =>
   place-items: center;
   border-radius: var(--radius);
   background: rgba(240, 253, 250, 0.92);
-  color: #0f766e;
+  color: var(--primary);
   font-size: 11px;
   font-weight: 900;
 }

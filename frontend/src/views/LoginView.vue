@@ -5,11 +5,13 @@ import AppAlert from '../components/ui/AppAlert.vue'
 import FieldError from '../components/ui/FieldError.vue'
 import { useAuth } from '../composables/useAuth'
 import { useI18n } from '../composables/useI18n'
+import { useTheme } from '../composables/useTheme'
 import { required, type ValidationErrors } from '../lib/validation'
 
 const route = useRoute()
 const router = useRouter()
 const { error: authError, isLoading, signIn } = useAuth()
+const { theme } = useTheme()
 const { t } = useI18n()
 
 const form = ref({
@@ -54,9 +56,14 @@ async function submitLogin() {
   <main class="login-page">
     <section class="login-panel surface">
       <div class="login-brand">
-        <span class="brand-mark">MS</span>
+        <span class="brand-mark">
+          <img
+            :src="theme === 'pink' ? '/brand/logo-pink.png' : '/brand/logo-blue.png'"
+            alt="Digital Forensics"
+          />
+        </span>
         <div>
-          <strong>MediaSpider</strong>
+          <strong>{{ t('app.name') }}</strong>
           <p>{{ t('app.subtitle') }}</p>
         </div>
       </div>
@@ -124,15 +131,22 @@ async function submitLogin() {
 }
 
 .brand-mark {
-  width: 42px;
-  height: 42px;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
+  overflow: hidden;
+  padding: 3px;
   border-radius: var(--radius);
-  background: linear-gradient(135deg, var(--primary-strong), var(--accent));
-  color: white;
-  font-weight: 900;
-  box-shadow: 0 12px 28px rgba(21, 94, 117, 0.24);
+  background: #fff;
+  border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
+  box-shadow: 0 12px 28px color-mix(in oklch, var(--primary) 24%, transparent);
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .login-brand strong {
