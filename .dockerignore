@@ -1,5 +1,8 @@
 .git
 .github
+.claude
+.vscode
+.idea
 .venv
 venv
 .pytest_cache
@@ -13,8 +16,13 @@ venv
 **/__pycache__
 **/*.py[cod]
 **/*.log
+**/*.sqlite3
+**/*.sqlite3-*
 backend/storage
 backups
 frontend/node_modules
 frontend/dist
 frontend/.vite
+# MediaCrawler is consumed via an additional build context, not this one.
+vendor
+Thumbs.db
