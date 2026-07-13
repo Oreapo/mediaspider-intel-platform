@@ -23,6 +23,15 @@ class SignalService:
     # Everything that is not CJK or an ASCII alphanumeric — the separators
     # used to break up a term (spaces, punctuation, symbols, emoji).
     _NON_TOKEN = re.compile(r"[^0-9a-z一-鿿]+")
+    # Homophone / look-alike spellings used to dodge keyword rules, mapped to
+    # their canonical form. Deliberately phrase-level and conservative (not a
+    # single-character homophone table) so legitimate words are not rewritten.
+    # Keys are already lowercase/collapsed. Extend as new variants are observed.
+    _VARIANT_ALIASES = {
+        "微信": ("薇信", "徽信", "溦信"),
+        "qq": ("扣扣", "抠抠"),
+        "引流": ("引留",),
+    }
     RISK_TERMS = {
         "引流": RiskLevel.HIGH,
         "兼职": RiskLevel.MEDIUM,
@@ -833,28 +842,38 @@ class SignalService:
     def _record_text(self, record: dict[str, Any]) -> str:
         return " ".join(str(value) for value in record.values() if value is not None)
 
-    def _fold(self, raw: str) -> str:
-        """NFKC-fold, strip zero-width/combining marks, lowercase.
+    def _apply_aliases(self, text: str) -> str:
+        """Rewrite known homophone/look-alike spellings to their canonical form."""
+        for canonical, variants in self._VARIANT_ALIASES.items():
+            for variant in variants:
+                if variant in text:
+                    text = text.replace(variant, canonical)
+        return text
 
-        Neutralises full-width evasion (ｖｘ→vx, ＱＱ→qq) and invisible
-        separators while preserving id structure (``_``/``-``), so it is safe
-        for contact-point extraction where the captured value matters.
+    def _fold(self, raw: str) -> str:
+        """NFKC-fold, strip zero-width/combining marks, lowercase, de-alias.
+
+        Neutralises full-width evasion (ｖｘ→vx, ＱＱ→qq), invisible separators
+        and common homophones (薇信→微信) while preserving id structure
+        (``_``/``-``), so it is safe for contact-point extraction where the
+        captured value matters.
         """
         if not raw:
             return ""
         folded = unicodedata.normalize("NFKC", raw)
         folded = self._ZERO_WIDTH.sub("", folded)
         folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
-        return folded.lower()
+        return self._apply_aliases(folded.lower())
 
     def _collapse(self, raw: str) -> str:
-        """Fold, then drop every non-CJK / non-alphanumeric character.
+        """Fold, drop every non-CJK / non-alphanumeric character, then de-alias.
 
         Defeats spacing, punctuation, symbol and emoji insertion between
-        characters (``微❤信``, ``加 我``, ``v-x`` → ``微信``/``加我``/``vx``) so
-        keyword and co-occurrence matching survives obfuscation.
+        characters (``微❤信``, ``加 我``, ``v-x`` → ``微信``/``加我``/``vx``) and
+        catches separator-split homophones (``薇 信`` → ``微信``), so keyword and
+        co-occurrence matching survives obfuscation.
         """
-        return self._NON_TOKEN.sub("", self._fold(raw))
+        return self._apply_aliases(self._NON_TOKEN.sub("", self._fold(raw)))
 
     def _source_ref(
         self,

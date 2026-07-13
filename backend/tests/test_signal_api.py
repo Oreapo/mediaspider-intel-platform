@@ -459,6 +459,72 @@ def test_extractors_defeat_obfuscated_black_grey_content(tmp_path):
         set_container(original_container)
 
 
+def test_extractors_resolve_homophone_variants(tmp_path):
+    """Look-alike spellings (薇信/扣扣/引留) must resolve to their canonical rule."""
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        sample_path = dataset_file_dir / "variant_notes.jsonl"
+        sample_path.write_text(
+            "\n".join(
+                [
+                    # 薇信 -> 微信 (contact trigger), 引留 -> 引流 (risk term)
+                    json.dumps(
+                        {"content_id": "v1", "title": "引留推广", "body": "加薇信：daili_8888"},
+                        ensure_ascii=False,
+                    ),
+                    # 扣扣 -> qq (contact trigger)
+                    json.dumps(
+                        {"content_id": "v2", "title": "低价", "body": "扣扣 998877665"},
+                        ensure_ascii=False,
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Variant Notes",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+                "storage_uri": "variant_notes.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        extract_response = client.post(
+            "/api/signals/extract",
+            json={
+                "dataset_id": dataset_id,
+                "extractors": ["risk_terms", "contact_points"],
+                "limit": 20,
+            },
+        )
+        assert extract_response.status_code == 200
+        signals = extract_response.json()["signals"]
+
+        # 引留 resolves to the 引流 risk term.
+        risk = [s for s in signals if s["signal_type"] == "risk_term_hit"]
+        assert any(s["payload_json"]["term"] == "引流" for s in risk)
+
+        # 薇信 and 扣扣 both resolve to contact triggers and capture the id.
+        contacts = {
+            s["payload_json"]["contact_point"]
+            for s in signals
+            if s["signal_type"] == "contact_point_hit"
+        }
+        assert "daili_8888" in contacts
+        assert "998877665" in contacts
+    finally:
+        set_container(original_container)
+
+
 def test_cluster_by_contact_groups_signals_sharing_contact_point(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container
