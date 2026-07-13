@@ -383,6 +383,82 @@ def test_traffic_route_extractor_requires_action_and_landing(tmp_path):
         set_container(original_container)
 
 
+def test_extractors_defeat_obfuscated_black_grey_content(tmp_path):
+    """Full-width, spacing, zero-width and emoji insertion must not evade rules."""
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        sample_path = dataset_file_dir / "obfuscated_notes.jsonl"
+        sample_path.write_text(
+            "\n".join(
+                [
+                    # 诚 招 (spaced), 日❤结 (emoji), 引​流 (zero-width),
+                    # 加ＶＸ (full-width) — every term is broken up on purpose.
+                    json.dumps(
+                        {
+                            "content_id": "o1",
+                            "title": "诚 招 代 理",
+                            "body": "日❤结佣金，引​流稳定，加ＶＸ：daili_8888",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {"content_id": "o2", "title": "今天天气", "body": "分享生活日常"},
+                        ensure_ascii=False,
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Obfuscated Notes",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "gray_recruitment",
+                "storage_uri": "obfuscated_notes.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        extract_response = client.post(
+            "/api/signals/extract",
+            json={
+                "dataset_id": dataset_id,
+                "extractors": ["risk_terms", "recruit_pattern", "contact_points"],
+                "limit": 20,
+            },
+        )
+        assert extract_response.status_code == 200
+        signals = extract_response.json()["signals"]
+        by_type = {s["signal_type"]: s for s in signals}
+
+        # Zero-width-split 引流 is still caught and flagged as evasive.
+        assert "risk_term_hit" in by_type
+        risk_hit = by_type["risk_term_hit"]
+        assert risk_hit["payload_json"]["term"] == "引流"
+        assert risk_hit["payload_json"]["deobfuscated"] is True
+
+        # Spaced 诚招 + emoji-split 日结 co-occurrence survives collapsing.
+        assert "recruit_pattern_hit" in by_type
+        assert by_type["recruit_pattern_hit"]["payload_json"]["deobfuscated"] is True
+
+        # Full-width ＶＸ folds to vx and the id keeps its underscore.
+        assert "contact_point_hit" in by_type
+        assert by_type["contact_point_hit"]["payload_json"]["contact_point"] == "daili_8888"
+
+        # The innocent row must not produce any signal.
+        row_indexes = {s["payload_json"]["source_ref"]["row_index"] for s in signals}
+        assert row_indexes == {0}
+    finally:
+        set_container(original_container)
+
+
 def test_cluster_by_contact_groups_signals_sharing_contact_point(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container

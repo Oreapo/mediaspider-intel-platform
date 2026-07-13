@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import datetime
 from typing import Any
 
@@ -16,6 +17,12 @@ class SignalService:
         r"(?:微信|vx|v信|qq|QQ|手机|电话|telegram|tg|群|加我|私信)[：:\s-]*([A-Za-z0-9_\-]{5,})",
         re.IGNORECASE,
     )
+    # Invisible characters black/grey actors splice into keywords to evade
+    # naive substring matching (zero-width joiners, BOM, word joiner, etc.).
+    _ZERO_WIDTH = re.compile(r"[​‌‍‎‏⁠﻿]")
+    # Everything that is not CJK or an ASCII alphanumeric — the separators
+    # used to break up a term (spaces, punctuation, symbols, emoji).
+    _NON_TOKEN = re.compile(r"[^0-9a-z一-鿿]+")
     RISK_TERMS = {
         "引流": RiskLevel.HIGH,
         "兼职": RiskLevel.MEDIUM,
@@ -369,8 +376,9 @@ class SignalService:
         dataset_platform: str,
     ) -> list[Signal]:
         signals: list[Signal] = []
+        norm = self._collapse(text)
         for term, risk_level in self.RISK_TERMS.items():
-            if term not in text:
+            if term not in norm:
                 continue
             signals.append(
                 Signal(
@@ -382,6 +390,7 @@ class SignalService:
                     summary=f"命中风险词：{term}",
                     payload_json={
                         "term": term,
+                        "deobfuscated": term not in text,
                         "row_index": row_index,
                         "source_ref": self._source_ref(dataset_id, row_index, record, dataset_platform),
                         "record_excerpt": text[:240],
@@ -398,8 +407,9 @@ class SignalService:
         text: str,
         dataset_platform: str,
     ) -> list[Signal]:
-        intents = [term for term in self.RECRUIT_INTENT_TERMS if term in text]
-        incentives = [term for term in self.RECRUIT_INCENTIVE_TERMS if term in text]
+        norm = self._collapse(text)
+        intents = [term for term in self.RECRUIT_INTENT_TERMS if term in norm]
+        incentives = [term for term in self.RECRUIT_INCENTIVE_TERMS if term in norm]
         if not intents or not incentives:
             return []
         return [
@@ -413,6 +423,7 @@ class SignalService:
                 payload_json={
                     "recruit_intent_terms": intents,
                     "recruit_incentive_terms": incentives,
+                    "deobfuscated": any(term not in text for term in intents + incentives),
                     "row_index": row_index,
                     "source_ref": self._source_ref(dataset_id, row_index, record, dataset_platform),
                     "record_excerpt": text[:240],
@@ -428,8 +439,9 @@ class SignalService:
         text: str,
         dataset_platform: str,
     ) -> list[Signal]:
-        offers = [term for term in self.SERVICE_OFFER_TERMS if term in text]
-        trades = [term for term in self.SERVICE_TRADE_TERMS if term in text]
+        norm = self._collapse(text)
+        offers = [term for term in self.SERVICE_OFFER_TERMS if term in norm]
+        trades = [term for term in self.SERVICE_TRADE_TERMS if term in norm]
         if not offers or not trades:
             return []
         return [
@@ -443,6 +455,7 @@ class SignalService:
                 payload_json={
                     "service_offer_terms": offers,
                     "service_trade_terms": trades,
+                    "deobfuscated": any(term not in text for term in offers + trades),
                     "row_index": row_index,
                     "source_ref": self._source_ref(dataset_id, row_index, record, dataset_platform),
                     "record_excerpt": text[:240],
@@ -458,8 +471,9 @@ class SignalService:
         text: str,
         dataset_platform: str,
     ) -> list[Signal]:
-        actions = [term for term in self.TRAFFIC_ACTION_TERMS if term in text]
-        landings = [term for term in self.TRAFFIC_LANDING_TERMS if term in text]
+        norm = self._collapse(text)
+        actions = [term for term in self.TRAFFIC_ACTION_TERMS if term in norm]
+        landings = [term for term in self.TRAFFIC_LANDING_TERMS if term in norm]
         if not actions or not landings:
             return []
         return [
@@ -473,6 +487,7 @@ class SignalService:
                 payload_json={
                     "traffic_action_terms": actions,
                     "traffic_landing_terms": landings,
+                    "deobfuscated": any(term not in text for term in actions + landings),
                     "row_index": row_index,
                     "source_ref": self._source_ref(dataset_id, row_index, record, dataset_platform),
                     "record_excerpt": text[:240],
@@ -490,7 +505,7 @@ class SignalService:
     ) -> list[Signal]:
         signals: list[Signal] = []
         seen: set[str] = set()
-        for match in self.CONTACT_PATTERN.finditer(text):
+        for match in self.CONTACT_PATTERN.finditer(self._fold(text)):
             value = match.group(1)
             if value in seen:
                 continue
@@ -817,6 +832,29 @@ class SignalService:
 
     def _record_text(self, record: dict[str, Any]) -> str:
         return " ".join(str(value) for value in record.values() if value is not None)
+
+    def _fold(self, raw: str) -> str:
+        """NFKC-fold, strip zero-width/combining marks, lowercase.
+
+        Neutralises full-width evasion (ｖｘ→vx, ＱＱ→qq) and invisible
+        separators while preserving id structure (``_``/``-``), so it is safe
+        for contact-point extraction where the captured value matters.
+        """
+        if not raw:
+            return ""
+        folded = unicodedata.normalize("NFKC", raw)
+        folded = self._ZERO_WIDTH.sub("", folded)
+        folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+        return folded.lower()
+
+    def _collapse(self, raw: str) -> str:
+        """Fold, then drop every non-CJK / non-alphanumeric character.
+
+        Defeats spacing, punctuation, symbol and emoji insertion between
+        characters (``微❤信``, ``加 我``, ``v-x`` → ``微信``/``加我``/``vx``) so
+        keyword and co-occurrence matching survives obfuscation.
+        """
+        return self._NON_TOKEN.sub("", self._fold(raw))
 
     def _source_ref(
         self,
