@@ -99,6 +99,28 @@ export async function listSignalClusters(datasetId: string) {
   return response.clusters
 }
 
+export interface ActivityBucket {
+  date: string
+  count: number
+  ratio: number
+  is_burst: boolean
+}
+
+export interface ActivityBursts {
+  total_records: number
+  day_count: number
+  baseline: number
+  threshold: number
+  buckets: ActivityBucket[]
+  bursts: ActivityBucket[]
+}
+
+export async function getActivityBursts(datasetId: string) {
+  return http.get<ActivityBursts>(
+    `/signals/activity?dataset_id=${encodeURIComponent(datasetId)}`,
+  )
+}
+
 export async function updateSignalStatus(signalId: string, status: string) {
   const response = await http.patch<{ signal: Signal }>(`/signals/${signalId}/status`, { status })
   return response.signal

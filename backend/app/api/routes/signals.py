@@ -90,6 +90,15 @@ def list_signal_gangs(
     return {"clusters": clusters, "total": len(clusters)}
 
 
+@router.get("/activity")
+def get_activity_bursts(
+    dataset_id: str = Query(..., min_length=1),
+    service: SignalService = Depends(get_signal_service),
+):
+    """Posting-activity timeline for a dataset with abnormal spikes flagged."""
+    return service.detect_activity_bursts(dataset_id)
+
+
 @router.get("/{signal_id}/detail")
 def get_signal_detail(
     signal_id: str,

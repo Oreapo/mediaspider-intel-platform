@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { createSignal, deleteSignal, extractSignals, listSignalClusters, updateSignalStatus, type SignalCluster } from '../api/signals'
+import { createSignal, deleteSignal, extractSignals, getActivityBursts, listSignalClusters, updateSignalStatus, type ActivityBursts, type SignalCluster } from '../api/signals'
 import AppAlert from '../components/ui/AppAlert.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
@@ -53,6 +53,10 @@ const filters = ref({
 })
 const selectedSignalId = ref('')
 const clusters = ref<SignalCluster[]>([])
+const activity = ref<ActivityBursts | null>(null)
+const activityMax = computed(() =>
+  Math.max(1, ...(activity.value?.buckets.map((bucket) => bucket.count) ?? [1])),
+)
 const message = ref('')
 const error = ref('')
 const busy = ref(false)
@@ -116,6 +120,7 @@ async function applyFilters() {
   filters.value.offset = 0
   await fetchSignalPage()
   await loadClusters()
+  await loadActivity()
 }
 
 // Candidate gangs (团伙) grouped by shared contact point for the filtered dataset.
@@ -128,6 +133,19 @@ async function loadClusters() {
     clusters.value = await listSignalClusters(filters.value.dataset_id)
   } catch {
     clusters.value = []
+  }
+}
+
+// Posting-activity timeline with abnormal spikes flagged for the filtered dataset.
+async function loadActivity() {
+  if (!filters.value.dataset_id) {
+    activity.value = null
+    return
+  }
+  try {
+    activity.value = await getActivityBursts(filters.value.dataset_id)
+  } catch {
+    activity.value = null
   }
 }
 
@@ -482,6 +500,31 @@ function statusTone(status: string) {
             </span>
           </div>
         </article>
+      </div>
+    </BaseSection>
+
+    <BaseSection
+      v-if="filters.dataset_id && activity && activity.day_count > 1"
+      :title="t('signals.activityTitle')"
+      :description="t('signals.activityDescription')"
+    >
+      <div class="activity-summary">
+        <span>{{ t('signals.activityBaseline', { value: activity.baseline }) }}</span>
+        <span :class="{ hot: activity.bursts.length }">
+          {{ t('signals.activityBurstCount', { count: activity.bursts.length }) }}
+        </span>
+      </div>
+      <div class="activity-timeline">
+        <div
+          v-for="bucket in activity.buckets"
+          :key="bucket.date"
+          class="activity-col"
+          :class="{ burst: bucket.is_burst }"
+          :title="`${bucket.date} · ${bucket.count} (${bucket.ratio}×)`"
+        >
+          <span class="activity-bar" :style="{ height: `${Math.round((bucket.count / activityMax) * 100)}%` }" />
+          <small>{{ bucket.date.slice(5) }}</small>
+        </div>
       </div>
     </BaseSection>
 
@@ -850,6 +893,62 @@ pre {
   .filter-form {
     grid-template-columns: 1fr;
   }
+}
+
+.activity-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.activity-summary .hot {
+  color: var(--destructive);
+}
+
+.activity-timeline {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-height: 132px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.activity-col {
+  flex: 1 0 26px;
+  display: grid;
+  align-content: end;
+  justify-items: center;
+  gap: 6px;
+  height: 116px;
+}
+
+.activity-col small {
+  font-size: 10px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.activity-bar {
+  width: 100%;
+  max-width: 26px;
+  min-height: 3px;
+  border-radius: 4px 4px 0 0;
+  background: color-mix(in oklch, var(--primary) 55%, transparent);
+}
+
+.activity-col.burst .activity-bar {
+  background: var(--destructive);
+  box-shadow: 0 6px 14px -6px color-mix(in oklch, var(--destructive) 60%, transparent);
+}
+
+.activity-col.burst small {
+  color: var(--destructive);
+  font-weight: 800;
 }
 
 .cluster-grid {

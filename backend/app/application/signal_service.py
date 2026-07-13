@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import statistics
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from ..api.schemas.signal import SignalCreateRequest
@@ -378,6 +379,107 @@ class SignalService:
                 keys.add(("account", str(user).strip()))
 
         return keys
+
+    def detect_activity_bursts(self, dataset_id: str, *, limit: int = 2000) -> dict[str, Any]:
+        """Detect abnormal spikes in a dataset's posting activity over time.
+
+        Resolves a calendar day for each record, counts posts per day, then
+        flags days whose volume stands out against the dataset's own baseline
+        (mean + 2·σ, with a small absolute floor to avoid noise on tiny sets).
+        A burst is the temporal fingerprint of a coordinated black/grey campaign
+        — many accounts pushing the same thing in a narrow window.
+        """
+        dataset = self.dataset_service.get_dataset(dataset_id)
+        if dataset is None:
+            raise ValueError(f"Dataset {dataset_id} not found")
+
+        preview = self.dataset_service.preview_dataset(dataset_id, limit=limit)
+        columns = [str(column) for column in preview.get("columns", [])]
+        per_day: dict[str, int] = {}
+        for row in preview.get("rows", []):
+            record = dict(zip(columns, row))
+            day = self._resolve_day(record)
+            if day:
+                per_day[day] = per_day.get(day, 0) + 1
+
+        counts = list(per_day.values())
+        total = sum(counts)
+        mean = statistics.fmean(counts) if counts else 0.0
+        stdev = statistics.pstdev(counts) if len(counts) > 1 else 0.0
+        threshold = mean + 2 * stdev
+
+        buckets: list[dict[str, Any]] = []
+        for day in sorted(per_day):
+            count = per_day[day]
+            is_burst = bool(count >= 3 and stdev > 0 and count >= threshold)
+            buckets.append(
+                {
+                    "date": day,
+                    "count": count,
+                    "ratio": round(count / mean, 2) if mean else 0.0,
+                    "is_burst": is_burst,
+                }
+            )
+
+        bursts = sorted(
+            (bucket for bucket in buckets if bucket["is_burst"]),
+            key=lambda bucket: bucket["count"],
+            reverse=True,
+        )
+        return {
+            "total_records": total,
+            "day_count": len(buckets),
+            "baseline": round(mean, 2),
+            "threshold": round(threshold, 2),
+            "buckets": buckets,
+            "bursts": bursts,
+        }
+
+    def _resolve_day(self, record: dict[str, Any]) -> str | None:
+        """Best-effort calendar day (YYYY-MM-DD) from a record's time fields."""
+        for field in (
+            "publish_time",
+            "published_at",
+            "publish_ts",
+            "create_time",
+            "created_time",
+            "created_at",
+            "add_ts",
+            "last_modify_ts",
+            "timestamp",
+            "time",
+            "date",
+        ):
+            if field in record and record[field] not in (None, ""):
+                day = self._to_day(record[field])
+                if day:
+                    return day
+        return None
+
+    def _to_day(self, raw: Any) -> str | None:
+        text = str(raw).strip()
+        if not text:
+            return None
+        if text.isdigit():
+            number = int(text)
+            if number >= 10**15:  # microseconds
+                number //= 1_000_000
+            elif number >= 10**12:  # milliseconds
+                number //= 1000
+            if number < 10**9:  # implausible as a modern epoch second
+                return None
+            try:
+                return datetime.fromtimestamp(number, tz=timezone.utc).strftime("%Y-%m-%d")
+            except (ValueError, OSError, OverflowError):
+                return None
+        match = re.match(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", text)
+        if match:
+            year, month, day = (int(part) for part in match.groups())
+            try:
+                return datetime(year, month, day).strftime("%Y-%m-%d")
+            except ValueError:
+                return None
+        return None
 
     def _gang_label(self, contacts: list[str], link_types: list[str]) -> str:
         if contacts:

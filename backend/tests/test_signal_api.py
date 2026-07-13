@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -578,6 +579,58 @@ def test_cluster_by_contact_groups_signals_sharing_contact_point(tmp_path):
         assert clusters[0]["max_risk_score"] == 95
         assert clusters[1]["contact_point"] == "qq_88888"
         assert clusters[1]["signal_count"] == 1
+    finally:
+        set_container(original_container)
+
+
+def test_detect_activity_bursts_flags_spike_day(tmp_path):
+    """A quiet baseline with one heavy day must flag that day as a burst."""
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+
+        rows = []
+        # Baseline: one post per day for six days (ISO strings).
+        for day in range(1, 7):
+            rows.append({"content_id": f"b{day}", "publish_time": f"2026-03-0{day} 09:00:00"})
+        # Burst: eight posts on a single later day (epoch milliseconds).
+        burst_ms = int(datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc).timestamp() * 1000)
+        for i in range(8):
+            rows.append({"content_id": f"s{i}", "publish_time": burst_ms + i * 1000})
+
+        (dataset_file_dir / "burst_source.jsonl").write_text(
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in rows),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Burst Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "topic_watch",
+                "storage_uri": "burst_source.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        response = client.get(f"/api/signals/activity?dataset_id={dataset_id}")
+        assert response.status_code == 200
+        result = response.json()
+
+        assert result["total_records"] == 14
+        assert result["day_count"] == 7
+        bursts = result["bursts"]
+        assert len(bursts) == 1
+        assert bursts[0]["date"] == "2026-03-10"
+        assert bursts[0]["count"] == 8
+        # The quiet days must not be flagged.
+        flagged = {b["date"] for b in result["buckets"] if b["is_burst"]}
+        assert flagged == {"2026-03-10"}
     finally:
         set_container(original_container)
 
