@@ -276,6 +276,121 @@ class SignalService:
         clusters.sort(key=lambda cluster: (cluster["signal_count"], cluster["max_risk_score"]), reverse=True)
         return clusters
 
+    def cluster_gangs(self, dataset_id: str) -> list[dict[str, Any]]:
+        """Cluster a dataset's signals into candidate gangs by relationship graph.
+
+        Builds an undirected graph whose nodes are signals and whose edges join
+        signals that share **any** identifier — a contact point, a reused
+        content/seller template, or an author id — then returns the connected
+        components (communities) with at least two signals. Transitivity means a
+        gang using several rotating contacts but one reused script (A—contact—B,
+        B—template—C) is surfaced as a single cluster, which pure contact
+        grouping misses. Ordered by size then peak risk.
+        """
+        signals = self.repository.list_signals(dataset_id=dataset_id)
+        parent = list(range(len(signals)))
+
+        def find(node: int) -> int:
+            while parent[node] != node:
+                parent[node] = parent[parent[node]]
+                node = parent[node]
+            return node
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[max(ra, rb)] = min(ra, rb)
+
+        signal_keys: list[set[tuple[str, str]]] = []
+        key_to_signals: dict[tuple[str, str], list[int]] = {}
+        for index, signal in enumerate(signals):
+            keys = self._gang_link_keys(signal)
+            signal_keys.append(keys)
+            for key in keys:
+                key_to_signals.setdefault(key, []).append(index)
+
+        for members in key_to_signals.values():
+            for other in members[1:]:
+                union(members[0], other)
+
+        components: dict[int, list[int]] = {}
+        for index in range(len(signals)):
+            components.setdefault(find(index), []).append(index)
+
+        clusters: list[dict[str, Any]] = []
+        for members in components.values():
+            if len(members) < 2:
+                continue
+            member_signals = [signals[index] for index in members]
+            shared_keys = set()
+            for index in members:
+                shared_keys |= {key for key in signal_keys[index] if len(key_to_signals[key]) >= 2}
+            contacts = sorted({value for kind, value in shared_keys if kind == "contact"})
+            link_types = sorted({kind for kind, _ in shared_keys})
+            risk_levels: dict[str, int] = {}
+            for member in member_signals:
+                risk_levels[member.risk_level.value] = risk_levels.get(member.risk_level.value, 0) + 1
+            platforms = sorted(
+                {
+                    str(platform)
+                    for member in member_signals
+                    if isinstance(member.payload_json.get("source_ref"), dict)
+                    for platform in [member.payload_json["source_ref"].get("source_platform")]
+                    if platform
+                }
+            )
+            clusters.append(
+                {
+                    "cluster_key": min(str(member.id) for member in member_signals),
+                    "label": self._gang_label(contacts, link_types),
+                    "link_types": link_types,
+                    "contact_point": contacts[0] if contacts else "",
+                    "contact_points": contacts,
+                    "platforms": platforms,
+                    "signal_ids": [str(member.id) for member in member_signals],
+                    "signal_count": len(member_signals),
+                    "risk_levels": risk_levels,
+                    "max_risk_score": max((member.risk_score for member in member_signals), default=0),
+                }
+            )
+        clusters.sort(key=lambda cluster: (cluster["signal_count"], cluster["max_risk_score"]), reverse=True)
+        return clusters
+
+    def _gang_link_keys(self, signal: Signal) -> set[tuple[str, str]]:
+        """Identifiers that tie a signal to others in the same gang."""
+        payload = signal.payload_json
+        keys: set[tuple[str, str]] = set()
+
+        contact = payload.get("contact_point")
+        if isinstance(contact, str) and contact.strip():
+            keys.add(("contact", contact.strip().lower()))
+        for contact in payload.get("contact_points") or []:
+            if isinstance(contact, str) and contact.strip():
+                keys.add(("contact", contact.strip().lower()))
+
+        for field in ("template_key", "seller_template_key"):
+            value = payload.get(field)
+            if isinstance(value, str) and value.strip():
+                keys.add(("template", value.strip()))
+
+        for user in payload.get("user_ids") or []:
+            if user is not None and str(user).strip():
+                keys.add(("account", str(user).strip()))
+
+        return keys
+
+    def _gang_label(self, contacts: list[str], link_types: list[str]) -> str:
+        if contacts:
+            label = contacts[0]
+            if len(contacts) > 1:
+                label += f" 等 {len(contacts)} 个联系方式"
+            return label
+        if "template" in link_types:
+            return "文案模板复用团伙"
+        if "account" in link_types:
+            return "同账号关联团伙"
+        return "关联团伙"
+
     def extract_from_dataset(
         self,
         *,

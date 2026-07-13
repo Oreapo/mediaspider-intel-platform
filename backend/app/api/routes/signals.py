@@ -79,6 +79,17 @@ def list_signal_clusters(
     return {"clusters": clusters, "total": len(clusters)}
 
 
+@router.get("/gangs")
+def list_signal_gangs(
+    dataset_id: str = Query(..., min_length=1),
+    service: SignalService = Depends(get_signal_service),
+):
+    """Candidate gangs (团伙) linked by a relationship graph — signals joined by
+    shared contact points, reused templates, or common author ids."""
+    clusters = service.cluster_gangs(dataset_id)
+    return {"clusters": clusters, "total": len(clusters)}
+
+
 @router.get("/{signal_id}/detail")
 def get_signal_detail(
     signal_id: str,

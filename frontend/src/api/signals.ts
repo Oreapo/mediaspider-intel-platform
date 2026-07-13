@@ -47,6 +47,12 @@ export interface SignalCluster {
   signal_count: number
   risk_levels: Record<string, number>
   max_risk_score: number
+  // Present on graph-based gang clusters (/signals/gangs).
+  cluster_key?: string
+  label?: string
+  link_types?: string[]
+  contact_points?: string[]
+  platforms?: string[]
 }
 
 function queryString(filters?: SignalListFilters) {
@@ -88,7 +94,7 @@ export async function extractSignals(payload: SignalExtractionPayload) {
 
 export async function listSignalClusters(datasetId: string) {
   const response = await http.get<{ clusters: SignalCluster[]; total: number }>(
-    `/signals/clusters?dataset_id=${encodeURIComponent(datasetId)}`,
+    `/signals/gangs?dataset_id=${encodeURIComponent(datasetId)}`,
   )
   return response.clusters
 }

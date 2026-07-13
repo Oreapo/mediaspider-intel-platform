@@ -459,10 +459,22 @@ function statusTone(status: string) {
       :description="t('signals.clustersDescription')"
     >
       <div class="cluster-grid">
-        <article v-for="cluster in clusters" :key="cluster.contact_point" class="cluster-card">
+        <article
+          v-for="cluster in clusters"
+          :key="cluster.cluster_key || cluster.contact_point"
+          class="cluster-card"
+        >
           <div class="cluster-head">
-            <strong>{{ cluster.contact_point }}</strong>
+            <strong>{{ cluster.label || cluster.contact_point }}</strong>
             <small>{{ t('signals.clusterSignalCount', { count: cluster.signal_count }) }}</small>
+          </div>
+          <div v-if="cluster.link_types && cluster.link_types.length" class="cluster-links">
+            <span v-for="type in cluster.link_types" :key="type" class="cluster-link">
+              {{ t(`signals.linkType.${type}`) }}
+            </span>
+            <span v-for="platform in cluster.platforms || []" :key="platform" class="cluster-platform">
+              {{ labelValue(platform) }}
+            </span>
           </div>
           <div class="cluster-risks">
             <span v-for="(count, level) in cluster.risk_levels" :key="level" class="cluster-risk">
@@ -872,6 +884,32 @@ pre {
   flex-shrink: 0;
   color: #64748b;
   font-weight: 800;
+}
+
+.cluster-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cluster-link,
+.cluster-platform {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cluster-link {
+  border: 1px solid color-mix(in oklch, var(--primary) 26%, transparent);
+  background: color-mix(in oklch, var(--primary) 10%, white);
+  color: var(--primary);
+}
+
+.cluster-platform {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(241, 245, 249, 0.8);
+  color: #475569;
 }
 
 .cluster-risks {

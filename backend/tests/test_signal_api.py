@@ -582,6 +582,70 @@ def test_cluster_by_contact_groups_signals_sharing_contact_point(tmp_path):
         set_container(original_container)
 
 
+def test_cluster_gangs_links_signals_transitively_across_attributes(tmp_path):
+    """A—contact—B and B—template—C must collapse into one gang."""
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        (dataset_file_dir / "gang_source.jsonl").write_text(
+            json.dumps({"content_id": "g1", "body": "seed"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Gang Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "gray_recruitment",
+                "storage_uri": "gang_source.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        def make_signal(payload, risk_level="high", risk_score=85):
+            client.post(
+                "/api/signals",
+                json={
+                    "dataset_id": dataset_id,
+                    "signal_type": "contact_point_hit",
+                    "signal_source": "rule:test",
+                    "risk_level": risk_level,
+                    "risk_score": risk_score,
+                    "summary": "test",
+                    "status": "new",
+                    "payload_json": payload,
+                },
+            )
+
+        # A shares a contact with B; B shares a template with C; A and C share
+        # nothing directly, yet all three are one gang.
+        make_signal({"contact_point": "wx_a", "source_ref": {"source_platform": "xhs"}})
+        make_signal({"contact_point": "wx_a", "template_key": "tpl-1"}, "critical", 96)
+        make_signal({"template_key": "tpl-1", "source_ref": {"source_platform": "dy"}})
+        # An unrelated signal stays out of the gang.
+        make_signal({"contact_point": "lonely_1"})
+
+        gangs = test_container.signal_service.cluster_gangs(dataset_id)
+        assert len(gangs) == 1
+        gang = gangs[0]
+        assert gang["signal_count"] == 3
+        assert set(gang["link_types"]) == {"contact", "template"}
+        assert gang["contact_points"] == ["wx_a"]
+        assert set(gang["platforms"]) == {"xhs", "dy"}
+        assert gang["max_risk_score"] == 96
+
+        response = client.get(f"/api/signals/gangs?dataset_id={dataset_id}")
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+    finally:
+        set_container(original_container)
+
+
 def test_signal_clusters_endpoint_returns_grouped_contacts(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container
