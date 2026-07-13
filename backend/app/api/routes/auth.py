@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..dependencies import get_auth_service, require_user
 from ..schemas.auth import AuthUserResponse, LoginRequest, LoginResponse
-from ...application.auth_service import AuthService, AuthUser
+from ...application.auth_service import AuthRateLimitedError, AuthService, AuthUser
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -14,6 +14,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def login(payload: LoginRequest, service: AuthService = Depends(get_auth_service)):
     try:
         token, user = service.login(payload.username, payload.password)
+    except AuthRateLimitedError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     return LoginResponse(

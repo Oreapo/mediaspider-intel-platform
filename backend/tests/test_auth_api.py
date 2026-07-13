@@ -43,6 +43,68 @@ def test_login_and_me_with_configured_user(tmp_path, monkeypatch):
         set_container(original_container)
 
 
+def test_hash_password_roundtrip_and_backward_compat():
+    from app.application.auth_service import AuthService
+
+    service = AuthService.__new__(AuthService)
+    hashed_a = AuthService.hash_password("s3cret!")
+    hashed_b = AuthService.hash_password("s3cret!")
+
+    assert hashed_a.startswith("pbkdf2_sha256$")
+    assert ":" not in hashed_a  # safe inside MEDIASPIDER_AUTH_USERS
+    assert hashed_a != hashed_b  # unique salt per hash
+    assert service._verify_password("s3cret!", hashed_a)
+    assert not service._verify_password("wrong", hashed_a)
+    # Plaintext still verifies for backward compatibility.
+    assert service._verify_password("plain", "plain")
+    assert not service._verify_password("plain", "other")
+
+
+def test_login_with_hashed_password(tmp_path, monkeypatch):
+    from app.application.auth_service import AuthService
+
+    hashed = AuthService.hash_password("s3cret!")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_USERS", f"analyst:{hashed}:analyst:Risk Analyst")
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        ok = client.post("/api/auth/login", json={"username": "analyst", "password": "s3cret!"})
+        assert ok.status_code == 200
+        assert ok.json()["user"]["role"] == "analyst"
+
+        bad = client.post("/api/auth/login", json={"username": "analyst", "password": "wrong"})
+        assert bad.status_code == 401
+    finally:
+        set_container(original_container)
+
+
+def test_login_rate_limited_after_repeated_failures(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDIASPIDER_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_USERS", "analyst:secret:analyst:Risk Analyst")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_MAX_ATTEMPTS", "3")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_LOCKOUT_SECONDS", "300")
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        client = TestClient(app)
+        for _ in range(3):
+            bad = client.post("/api/auth/login", json={"username": "analyst", "password": "wrong"})
+            assert bad.status_code == 401
+
+        # Further attempts are locked out, even with the correct password.
+        locked = client.post("/api/auth/login", json={"username": "analyst", "password": "secret"})
+        assert locked.status_code == 429
+        assert "Retry-After" in locked.headers
+    finally:
+        set_container(original_container)
+
+
 def test_me_requires_token_when_auth_required(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIASPIDER_AUTH_REQUIRED", "true")
     test_container = AppContainer(tmp_path)
