@@ -113,9 +113,9 @@ def test_crawler_docker_overlay_packages_runtime_and_browser():
     assert "MEDIASPIDER_MEDIA_CRAWLER_COMMAND: python /app/backend/scripts/run_mediacrawler.py" in compose
     assert "mediaspider-browser-data:/opt/mediacrawler/browser_data" in compose
     assert 'shm_size: "1gb"' in compose
-    assert "chromium" in dockerfile
+    assert "playwright install chromium" in dockerfile
     assert "requirements-mediacrawler.txt" in dockerfile
-    assert "COPY --from=mediacrawler . /opt/mediacrawler" in dockerfile
+    assert re.search(r"COPY --from=mediacrawler\b.*/opt/mediacrawler", dockerfile)
     assert 'ENTRYPOINT ["dumb-init", "--"]' in dockerfile
 
 
@@ -194,7 +194,7 @@ def test_settings_platform_profile_options_use_backend_platform_models():
     settings_view = FRONTEND_SETTINGS_VIEW.read_text(encoding="utf-8")
 
     assert "usePlatformModels" in settings_view
-    assert re.search(r'v-for="item in profilePlatformOptions"', settings_view)
+    assert re.search(r':options="profilePlatformOptions', settings_view)
     assert re.findall(r'<option\s+value=["\'](?:xhs|dy|ks|bili|wb|tieba|zhihu|xianyu)["\']', settings_view) == []
 
 
