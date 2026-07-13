@@ -14,6 +14,7 @@ from ..dependencies import (
 from ..schemas.signal import SignalCreateRequest, SignalExtractionRequest, SignalStatusUpdateRequest
 from ...application.case_service import CaseService
 from ...application.dataset_service import DatasetService
+from ...application.pii import mask_signal, mask_signals, masking_enabled
 from ...application.signal_service import SignalService
 from ...application.task_service import CollectionTaskService
 from ...domain.models.signal import RiskLevel, SignalStatus, SignalType
@@ -42,7 +43,10 @@ def list_signals(
         limit=limit,
         offset=offset,
     )
-    return {"signals": [signal.model_dump(mode="json") for signal in signals], "total": total}
+    payload = [signal.model_dump(mode="json") for signal in signals]
+    if masking_enabled():
+        payload = mask_signals(payload)
+    return {"signals": payload, "total": total}
 
 
 @router.post("/extract", dependencies=[Depends(require_roles(*ANALYST_ROLES))])
@@ -61,9 +65,12 @@ def extract_signals(
         if "not found" in detail.lower():
             raise HTTPException(status_code=404, detail=detail) from exc
         raise HTTPException(status_code=400, detail=detail) from exc
+    extracted = [signal.model_dump(mode="json") for signal in signals]
+    if masking_enabled():
+        extracted = mask_signals(extracted)
     return {
         "message": "Signals extracted",
-        "signals": [signal.model_dump(mode="json") for signal in signals],
+        "signals": extracted,
         "created_count": len(signals),
         "dedupe_enabled": True,
     }
@@ -131,8 +138,11 @@ def get_signal_detail(
         )
 
     linked_case_details = _linked_case_details(signal.id, case_service)
+    signal_json = signal.model_dump(mode="json")
+    if masking_enabled():
+        signal_json = mask_signal(signal_json)
     return {
-        "signal": signal.model_dump(mode="json"),
+        "signal": signal_json,
         "dataset": dataset.model_dump(mode="json") if dataset else None,
         "preview": preview,
         "source_task": source_task.model_dump(mode="json") if source_task else None,
@@ -147,7 +157,10 @@ def get_signal(signal_id: str, service: SignalService = Depends(get_signal_servi
     signal = service.get_signal(signal_id)
     if signal is None:
         raise HTTPException(status_code=404, detail="Signal not found")
-    return {"signal": signal.model_dump(mode="json")}
+    signal_json = signal.model_dump(mode="json")
+    if masking_enabled():
+        signal_json = mask_signal(signal_json)
+    return {"signal": signal_json}
 
 
 @router.post("", dependencies=[Depends(require_roles(*ANALYST_ROLES))])
