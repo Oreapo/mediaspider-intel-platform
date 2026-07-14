@@ -6,12 +6,16 @@ from ..dependencies import (
     READ_ROLES,
     WORKFLOW_ROLES,
     get_analysis_service,
+    get_audit_service,
     get_dataset_service,
     get_signal_service,
     require_roles,
+    require_user,
 )
 from ..schemas.dataset import DatasetCreateRequest
 from ...application.analysis_service import AnalysisService
+from ...application.audit_service import AuditService
+from ...application.auth_service import AuthUser
 from ...application.dataset_service import DatasetService
 from ...application.pii import mask_preview, masking_enabled
 from ...application.signal_service import SignalService
@@ -108,6 +112,8 @@ def preview_dataset(
     dataset_id: str,
     limit: int = Query(50, ge=1, le=200),
     service: DatasetService = Depends(get_dataset_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    actor: AuthUser = Depends(require_user),
 ):
     try:
         preview = service.preview_dataset(dataset_id, limit=limit)
@@ -116,4 +122,13 @@ def preview_dataset(
         if "not found" in detail.lower():
             raise HTTPException(status_code=404, detail=detail) from exc
         raise HTTPException(status_code=400, detail=detail) from exc
-    return mask_preview(preview) if masking_enabled() else preview
+    masked = masking_enabled()
+    audit_service.record(
+        action="dataset.preview",
+        actor=actor,
+        target_type="dataset",
+        target_id=dataset_id,
+        summary=f"预览数据集原始记录（{'脱敏' if masked else '明文'}）",
+        metadata_json={"row_count": len(preview.get("rows", [])), "limit": limit, "masked": masked},
+    )
+    return mask_preview(preview) if masked else preview

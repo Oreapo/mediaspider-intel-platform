@@ -5,13 +5,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ..dependencies import (
     ANALYST_ROLES,
     READ_ROLES,
+    get_audit_service,
     get_case_service,
     get_dataset_service,
     get_signal_service,
     get_task_service,
     require_roles,
+    require_user,
 )
 from ..schemas.signal import SignalCreateRequest, SignalExtractionRequest, SignalStatusUpdateRequest
+from ...application.audit_service import AuditService
+from ...application.auth_service import AuthUser
 from ...application.case_service import CaseService
 from ...application.dataset_service import DatasetService
 from ...application.pii import mask_clusters, mask_preview, mask_signal, mask_signals, masking_enabled
@@ -117,6 +121,8 @@ def get_signal_detail(
     dataset_service: DatasetService = Depends(get_dataset_service),
     task_service: CollectionTaskService = Depends(get_task_service),
     case_service: CaseService = Depends(get_case_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    actor: AuthUser = Depends(require_user),
 ):
     signal = service.get_signal(signal_id)
     if signal is None:
@@ -143,9 +149,18 @@ def get_signal_detail(
 
     linked_case_details = _linked_case_details(signal.id, case_service)
     signal_json = signal.model_dump(mode="json")
-    if masking_enabled():
+    masked = masking_enabled()
+    if masked:
         signal_json = mask_signal(signal_json)
         preview = mask_preview(preview)
+    audit_service.record(
+        action="signal.detail_view",
+        actor=actor,
+        target_type="signal",
+        target_id=str(signal.id),
+        summary=f"查看信号详情（{'脱敏' if masked else '明文'}）",
+        metadata_json={"dataset_id": signal.dataset_id, "masked": masked},
+    )
     return {
         "signal": signal_json,
         "dataset": dataset.model_dump(mode="json") if dataset else None,

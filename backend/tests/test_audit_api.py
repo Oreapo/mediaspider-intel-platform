@@ -143,3 +143,61 @@ def test_case_evidence_and_report_actions_write_audit_events(tmp_path):
         assert {event["action"] for event in case_events.json()["events"]} >= {"case.create", "case.note.add"}
     finally:
         set_container(original_container)
+
+
+def test_sensitive_data_access_writes_audit_events(tmp_path):
+    import json
+
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        (dataset_file_dir / "audited_preview.jsonl").write_text(
+            json.dumps({"content_id": "a1", "wechat": "daili_8888"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Audited Preview",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+                "storage_uri": "audited_preview.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        # Previewing raw data is recorded.
+        assert client.get(f"/api/datasets/{dataset_id}/preview").status_code == 200
+        preview_events = client.get(
+            "/api/logs/audit", params={"target_type": "dataset", "action": "dataset.preview"}
+        ).json()["events"]
+        assert len(preview_events) == 1
+        assert preview_events[0]["metadata_json"]["masked"] is False
+
+        # Viewing a signal's full detail is recorded.
+        signal = client.post(
+            "/api/signals",
+            json={
+                "dataset_id": dataset_id,
+                "signal_type": "contact_point_hit",
+                "signal_source": "rule:test",
+                "risk_level": "high",
+                "risk_score": 85,
+                "summary": "test",
+                "status": "new",
+                "payload_json": {"contact_point": "daili_8888"},
+            },
+        ).json()["signal"]
+        assert client.get(f"/api/signals/{signal['id']}/detail").status_code == 200
+        detail_events = client.get(
+            "/api/logs/audit", params={"target_type": "signal", "action": "signal.detail_view"}
+        ).json()["events"]
+        assert len(detail_events) == 1
+        assert detail_events[0]["metadata_json"]["masked"] is False
+    finally:
+        set_container(original_container)
