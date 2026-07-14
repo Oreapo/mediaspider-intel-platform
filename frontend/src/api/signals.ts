@@ -79,8 +79,9 @@ export async function getSignal(signalId: string) {
   return response.signal
 }
 
-export async function getSignalDetail(signalId: string) {
-  return http.get<SignalDetailPayload>(`/signals/${signalId}/detail`)
+export async function getSignalDetail(signalId: string, reveal = false) {
+  const query = reveal ? '?reveal=true' : ''
+  return http.get<SignalDetailPayload>(`/signals/${signalId}/detail${query}`)
 }
 
 export async function createSignal(payload: SignalCreatePayload) {

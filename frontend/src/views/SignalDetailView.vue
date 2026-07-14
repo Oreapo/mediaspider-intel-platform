@@ -10,13 +10,18 @@ import PermissionGate from '../components/ui/PermissionGate.vue'
 import RetryState from '../components/ui/RetryState.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useI18n } from '../composables/useI18n'
+import { useAuth } from '../composables/useAuth'
+import { hasRole } from '../lib/permissions'
 import { enumLabel as labelValue, scenarioLabel } from '../composables/useEnumLabel'
 import type { CaseDetail, CaseRecord, CollectionTask, Dataset, DatasetPreview, Signal, TaskRun } from '../types'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
+const { user } = useAuth()
 const signalId = computed(() => String(route.params.signalId || ''))
+const canReveal = computed(() => hasRole(user.value, ['admin']))
+const revealed = ref(false)
 
 const signal = ref<Signal | null>(null)
 const dataset = ref<Dataset | null>(null)
@@ -62,12 +67,12 @@ const summaryCards = computed(() => [
   { label: t('signalDetail.linkedCases'), value: linkedCases.value.length },
 ])
 
-async function loadDetail() {
+async function loadDetail(reveal = false) {
   if (!signalId.value) return
   isLoading.value = true
   error.value = ''
   try {
-    const detail = await getSignalDetail(signalId.value)
+    const detail = await getSignalDetail(signalId.value, reveal)
     signal.value = detail.signal
     dataset.value = detail.dataset
     preview.value = detail.preview
@@ -75,11 +80,16 @@ async function loadDetail() {
     sourceRun.value = detail.source_run
     linkedCases.value = detail.linked_cases
     linkedCaseDetails.value = detail.linked_case_details
+    revealed.value = reveal
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     isLoading.value = false
   }
+}
+
+async function revealPlaintext() {
+  await loadDetail(true)
 }
 
 async function setStatus(status: string) {
@@ -215,6 +225,18 @@ onMounted(loadDetail)
 
       <div class="split-grid">
         <BaseSection :title="t('signalDetail.evidenceFieldsTitle')" :description="t('signalDetail.evidenceFieldsDescription')">
+          <template v-if="canReveal" #actions>
+            <button
+              v-if="!revealed"
+              class="secondary-button"
+              type="button"
+              :disabled="isLoading"
+              @click="revealPlaintext"
+            >
+              {{ t('signalDetail.revealPlaintext') }}
+            </button>
+            <span v-else class="reveal-note">{{ t('signalDetail.revealed') }}</span>
+          </template>
           <div class="field-list">
             <div v-for="field in evidenceFields" :key="field.key" class="field-card">
               <span>{{ field.key }}</span>
@@ -247,6 +269,12 @@ onMounted(loadDetail)
 </template>
 
 <style scoped>
+.reveal-note {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--warning);
+}
+
 .page-grid,
 .item-list,
 .field-list,

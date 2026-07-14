@@ -17,7 +17,7 @@ from ...application.analysis_service import AnalysisService
 from ...application.audit_service import AuditService
 from ...application.auth_service import AuthUser
 from ...application.dataset_service import DatasetService
-from ...application.pii import mask_preview, masking_enabled
+from ...application.pii import can_reveal_pii, mask_preview, masking_enabled
 from ...application.signal_service import SignalService
 from ...domain.models.dataset import DatasetType
 from ...domain.models.platform import PlatformKey
@@ -111,6 +111,7 @@ def delete_dataset(
 def preview_dataset(
     dataset_id: str,
     limit: int = Query(50, ge=1, le=200),
+    reveal: bool = Query(default=False),
     service: DatasetService = Depends(get_dataset_service),
     audit_service: AuditService = Depends(get_audit_service),
     actor: AuthUser = Depends(require_user),
@@ -123,12 +124,23 @@ def preview_dataset(
             raise HTTPException(status_code=404, detail=detail) from exc
         raise HTTPException(status_code=400, detail=detail) from exc
     masked = masking_enabled()
+    revealed = False
+    if masked and reveal:
+        if not can_reveal_pii(actor.role):
+            raise HTTPException(status_code=403, detail="Not permitted to view unmasked data")
+        masked = False
+        revealed = True
     audit_service.record(
         action="dataset.preview",
         actor=actor,
         target_type="dataset",
         target_id=dataset_id,
-        summary=f"预览数据集原始记录（{'脱敏' if masked else '明文'}）",
-        metadata_json={"row_count": len(preview.get("rows", [])), "limit": limit, "masked": masked},
+        summary=f"预览数据集原始记录（{'明文' if not masked else '脱敏'}）",
+        metadata_json={
+            "row_count": len(preview.get("rows", [])),
+            "limit": limit,
+            "masked": masked,
+            "revealed": revealed,
+        },
     )
     return mask_preview(preview) if masked else preview

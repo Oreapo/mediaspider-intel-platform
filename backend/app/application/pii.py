@@ -15,6 +15,8 @@ from typing import Any
 # Mainland China mobile numbers — masked to keep the prefix and last four.
 _PHONE = re.compile(r"(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)")
 _TRUTHY = {"1", "true", "yes", "on"}
+# Roles allowed to view unmasked personal data on demand.
+_REVEAL_ROLES = {"admin"}
 # Column-name fragments that mark a preview column as holding a contact value.
 _CONTACT_COLUMN_HINTS = (
     "contact",
@@ -31,6 +33,11 @@ _CONTACT_COLUMN_HINTS = (
 
 def masking_enabled() -> bool:
     return os.getenv("MEDIASPIDER_PII_MASKING", "false").strip().lower() in _TRUTHY
+
+
+def can_reveal_pii(role: str) -> bool:
+    """Whether a role may request unmasked personal data."""
+    return role in _REVEAL_ROLES
 
 
 def mask_value(value: str) -> str:

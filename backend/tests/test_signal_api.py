@@ -713,6 +713,94 @@ def test_pii_masking_masks_dataset_preview_and_gangs(tmp_path, monkeypatch):
         set_container(original_container)
 
 
+def test_pii_reveal_allows_admin_and_blocks_analyst(tmp_path, monkeypatch):
+    from app.application.auth_service import AuthService
+
+    admin_hash = AuthService.hash_password("adminpw")
+    analyst_hash = AuthService.hash_password("analystpw")
+    monkeypatch.setenv("MEDIASPIDER_PII_MASKING", "true")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("MEDIASPIDER_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv(
+        "MEDIASPIDER_AUTH_USERS",
+        f"boss:{admin_hash}:admin:Boss,ana:{analyst_hash}:analyst:Analyst",
+    )
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        (dataset_file_dir / "reveal.jsonl").write_text(
+            json.dumps({"content_id": "r1", "body": "seed"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+
+        def headers(username, password):
+            token = client.post(
+                "/api/auth/login", json={"username": username, "password": password}
+            ).json()["token"]
+            return {"Authorization": f"Bearer {token}"}
+
+        admin_headers = headers("boss", "adminpw")
+        analyst_headers = headers("ana", "analystpw")
+
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "Reveal Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+                "storage_uri": "reveal.jsonl",
+            },
+            headers=admin_headers,
+        ).json()["dataset"]["id"]
+
+        signal_id = client.post(
+            "/api/signals",
+            json={
+                "dataset_id": dataset_id,
+                "signal_type": "contact_point_hit",
+                "signal_source": "rule:test",
+                "risk_level": "high",
+                "risk_score": 85,
+                "summary": "疑似联系方式：daili_8888",
+                "status": "new",
+                "payload_json": {"contact_point": "daili_8888"},
+            },
+            headers=admin_headers,
+        ).json()["signal"]["id"]
+
+        # Analyst gets masked; requesting reveal is forbidden.
+        masked = client.get(f"/api/signals/{signal_id}/detail", headers=analyst_headers).json()
+        assert masked["signal"]["payload_json"]["contact_point"] == "da******88"
+        forbidden = client.get(
+            f"/api/signals/{signal_id}/detail?reveal=true", headers=analyst_headers
+        )
+        assert forbidden.status_code == 403
+
+        # Admin reveal returns the raw contact and records an in-clear access.
+        revealed = client.get(
+            f"/api/signals/{signal_id}/detail?reveal=true", headers=admin_headers
+        ).json()
+        assert revealed["signal"]["payload_json"]["contact_point"] == "daili_8888"
+
+        events = client.get(
+            "/api/logs/audit",
+            params={"action": "signal.detail_view", "actor_username": "boss"},
+            headers=admin_headers,
+        ).json()["events"]
+        assert any(
+            event["metadata_json"].get("revealed") is True and event["metadata_json"].get("masked") is False
+            for event in events
+        )
+    finally:
+        set_container(original_container)
+
+
 def test_pii_masking_off_by_default_keeps_raw_contact(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container

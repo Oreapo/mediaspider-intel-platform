@@ -18,7 +18,14 @@ from ...application.audit_service import AuditService
 from ...application.auth_service import AuthUser
 from ...application.case_service import CaseService
 from ...application.dataset_service import DatasetService
-from ...application.pii import mask_clusters, mask_preview, mask_signal, mask_signals, masking_enabled
+from ...application.pii import (
+    can_reveal_pii,
+    mask_clusters,
+    mask_preview,
+    mask_signal,
+    mask_signals,
+    masking_enabled,
+)
 from ...application.signal_service import SignalService
 from ...application.task_service import CollectionTaskService
 from ...domain.models.signal import RiskLevel, SignalStatus, SignalType
@@ -117,6 +124,7 @@ def get_activity_bursts(
 @router.get("/{signal_id}/detail")
 def get_signal_detail(
     signal_id: str,
+    reveal: bool = Query(default=False),
     service: SignalService = Depends(get_signal_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
     task_service: CollectionTaskService = Depends(get_task_service),
@@ -150,6 +158,12 @@ def get_signal_detail(
     linked_case_details = _linked_case_details(signal.id, case_service)
     signal_json = signal.model_dump(mode="json")
     masked = masking_enabled()
+    revealed = False
+    if masked and reveal:
+        if not can_reveal_pii(actor.role):
+            raise HTTPException(status_code=403, detail="Not permitted to view unmasked data")
+        masked = False
+        revealed = True
     if masked:
         signal_json = mask_signal(signal_json)
         preview = mask_preview(preview)
@@ -158,8 +172,8 @@ def get_signal_detail(
         actor=actor,
         target_type="signal",
         target_id=str(signal.id),
-        summary=f"查看信号详情（{'脱敏' if masked else '明文'}）",
-        metadata_json={"dataset_id": signal.dataset_id, "masked": masked},
+        summary=f"查看信号详情（{'明文' if not masked else '脱敏'}）",
+        metadata_json={"dataset_id": signal.dataset_id, "masked": masked, "revealed": revealed},
     )
     return {
         "signal": signal_json,
