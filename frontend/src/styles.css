@@ -29,7 +29,7 @@
   --brand-soft: rgba(30, 64, 230, 0.1);
   --brand-glow: rgba(30, 64, 230, 0.24);
 
-  --shadow: 0 22px 48px -26px rgba(26, 40, 80, 0.42);
+  --shadow: 0 22px 46px -24px rgba(26, 40, 80, 0.46);
   --shadow-subtle:
     inset 0 1px 0 rgba(255, 255, 255, 0.82),
     0 12px 28px -18px rgba(26, 40, 80, 0.3);
@@ -66,8 +66,9 @@ body {
   min-height: 100vh;
   font-family: var(--font-sans);
   background:
-    radial-gradient(1200px 600px at 12% -8%, var(--brand-tint), transparent 60%),
-    radial-gradient(1000px 560px at 100% 0%, var(--brand-tint), transparent 55%),
+    radial-gradient(1200px 640px at 8% -12%, var(--brand-soft), transparent 56%),
+    radial-gradient(900px 520px at 100% -6%, var(--brand-soft), transparent 54%),
+    radial-gradient(760px 760px at 50% 128%, var(--brand-tint), transparent 60%),
     linear-gradient(180deg, #ffffff 0%, var(--background) 100%);
   background-attachment: fixed;
   color: var(--foreground);
@@ -127,9 +128,9 @@ button:not(:disabled):active {
 }
 
 .surface {
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in oklch, var(--primary) 9%, var(--border));
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.5), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent 44%),
     var(--card);
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px) saturate(1.12);
@@ -300,6 +301,35 @@ code {
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), transparent);
   pointer-events: none;
+}
+
+/* Lift the plain "big number" stat cards used across views: brand-tinted
+   fill, a colored accent rail and a subtle hover — no per-view markup needed. */
+.stat-card {
+  overflow: hidden;
+  background:
+    radial-gradient(135% 150% at 100% 0%, color-mix(in oklch, var(--stat-accent, var(--primary)) 10%, transparent), transparent 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6), transparent 46%),
+    var(--card);
+  border-color: color-mix(in oklch, var(--stat-accent, var(--primary)) 15%, var(--border));
+  transition:
+    transform 180ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+.stat-card::before {
+  inset: 0 auto 0 0;
+  width: 4px;
+  height: auto;
+  background: linear-gradient(180deg, var(--stat-accent, var(--primary)), color-mix(in oklch, var(--stat-accent, var(--primary)) 68%, #10203f));
+  opacity: 0.9;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
+  border-color: color-mix(in oklch, var(--stat-accent, var(--primary)) 32%, var(--border));
 }
 
 @media (prefers-reduced-motion: no-preference) {

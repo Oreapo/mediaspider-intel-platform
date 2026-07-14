@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { createSignal, deleteSignal, extractSignals, getActivityBursts, listSignalClusters, updateSignalStatus, type ActivityBursts, type SignalCluster } from '../api/signals'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -69,10 +70,10 @@ const selectedSignal = computed(() =>
 
 const signalStats = computed(() => {
   const stats = [
-    { label: t('enum.new'), value: signalItems.value.filter((item) => item.status === 'new').length },
-    { label: t('enum.reviewing'), value: signalItems.value.filter((item) => item.status === 'reviewing').length },
-    { label: t('enum.confirmed'), value: signalItems.value.filter((item) => item.status === 'confirmed').length },
-    { label: t('signals.highRiskPlus'), value: signalItems.value.filter((item) => ['high', 'critical'].includes(item.risk_level)).length },
+    { label: t('enum.new'), value: signalItems.value.filter((item) => item.status === 'new').length, icon: 'activity', color: 'var(--primary)' },
+    { label: t('enum.reviewing'), value: signalItems.value.filter((item) => item.status === 'reviewing').length, icon: 'search', color: '#cf8214' },
+    { label: t('enum.confirmed'), value: signalItems.value.filter((item) => item.status === 'confirmed').length, icon: 'shield', color: '#17915a' },
+    { label: t('signals.highRiskPlus'), value: signalItems.value.filter((item) => ['high', 'critical'].includes(item.risk_level)).length, icon: 'alert', color: '#dc4536' },
   ]
   return stats
 })
@@ -297,8 +298,16 @@ function statusTone(status: string) {
 <template>
   <section class="page-grid">
     <div class="stats-grid">
-      <article v-for="stat in signalStats" :key="stat.label" class="surface stat-card">
-        <span>{{ stat.label }}</span>
+      <article
+        v-for="stat in signalStats"
+        :key="stat.label"
+        class="surface stat-card"
+        :style="{ '--stat-accent': stat.color }"
+      >
+        <div class="stat-top">
+          <span>{{ stat.label }}</span>
+          <span class="stat-icon"><AppIcon :name="stat.icon" :size="18" /></span>
+        </div>
         <strong>{{ stat.value }}</strong>
       </article>
     </div>
@@ -662,13 +671,40 @@ function statusTone(status: string) {
   gap: 18px;
 }
 
-.section-card,
-.stat-card {
+.section-card {
   border-radius: 24px;
   padding: 22px;
 }
 
-.stat-card span,
+.stat-card {
+  border-radius: 20px;
+  padding: 18px 20px 16px;
+  display: grid;
+  align-content: space-between;
+  gap: 14px;
+  min-height: 116px;
+}
+
+.stat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stat-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  color: var(--stat-accent, var(--primary));
+  background: color-mix(in oklch, var(--stat-accent, var(--primary)) 13%, white);
+  border: 1px solid color-mix(in oklch, var(--stat-accent, var(--primary)) 26%, transparent);
+}
+
+.stat-top span:first-child,
 .section-head p,
 .muted,
 .field span,
@@ -678,10 +714,16 @@ function statusTone(status: string) {
   color: #64748b;
 }
 
+.stat-top span:first-child {
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .stat-card strong {
   display: block;
-  margin-top: 6px;
-  font-size: 34px;
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: -0.01em;
 }
 
 .section-head {
