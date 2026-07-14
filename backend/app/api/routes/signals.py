@@ -14,7 +14,7 @@ from ..dependencies import (
 from ..schemas.signal import SignalCreateRequest, SignalExtractionRequest, SignalStatusUpdateRequest
 from ...application.case_service import CaseService
 from ...application.dataset_service import DatasetService
-from ...application.pii import mask_signal, mask_signals, masking_enabled
+from ...application.pii import mask_clusters, mask_preview, mask_signal, mask_signals, masking_enabled
 from ...application.signal_service import SignalService
 from ...application.task_service import CollectionTaskService
 from ...domain.models.signal import RiskLevel, SignalStatus, SignalType
@@ -83,6 +83,8 @@ def list_signal_clusters(
 ):
     """Candidate gangs (团伙) — a dataset's signals grouped by shared contact point."""
     clusters = service.cluster_by_contact(dataset_id)
+    if masking_enabled():
+        clusters = mask_clusters(clusters)
     return {"clusters": clusters, "total": len(clusters)}
 
 
@@ -94,6 +96,8 @@ def list_signal_gangs(
     """Candidate gangs (团伙) linked by a relationship graph — signals joined by
     shared contact points, reused templates, or common author ids."""
     clusters = service.cluster_gangs(dataset_id)
+    if masking_enabled():
+        clusters = mask_clusters(clusters)
     return {"clusters": clusters, "total": len(clusters)}
 
 
@@ -141,6 +145,7 @@ def get_signal_detail(
     signal_json = signal.model_dump(mode="json")
     if masking_enabled():
         signal_json = mask_signal(signal_json)
+        preview = mask_preview(preview)
     return {
         "signal": signal_json,
         "dataset": dataset.model_dump(mode="json") if dataset else None,

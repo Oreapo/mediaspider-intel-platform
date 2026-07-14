@@ -15,6 +15,18 @@ from typing import Any
 # Mainland China mobile numbers — masked to keep the prefix and last four.
 _PHONE = re.compile(r"(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)")
 _TRUTHY = {"1", "true", "yes", "on"}
+# Column-name fragments that mark a preview column as holding a contact value.
+_CONTACT_COLUMN_HINTS = (
+    "contact",
+    "phone",
+    "mobile",
+    "tel",
+    "wechat",
+    "weixin",
+    "vx",
+    "qq",
+    "email",
+)
 
 
 def masking_enabled() -> bool:
@@ -71,3 +83,58 @@ def mask_signal(signal: dict[str, Any]) -> dict[str, Any]:
 
 def mask_signals(signals: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [mask_signal(signal) for signal in signals]
+
+
+def _is_contact_column(name: str) -> bool:
+    lowered = name.lower()
+    return any(hint in lowered for hint in _CONTACT_COLUMN_HINTS)
+
+
+def mask_preview(preview: dict[str, Any]) -> dict[str, Any]:
+    """Mask contact columns and phone numbers in a dataset preview table."""
+    columns = preview.get("columns")
+    rows = preview.get("rows")
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        return preview
+
+    contact_columns = {index for index, column in enumerate(columns) if _is_contact_column(str(column))}
+    masked_rows: list[Any] = []
+    for row in rows:
+        if not isinstance(row, list):
+            masked_rows.append(row)
+            continue
+        masked_row = []
+        for index, cell in enumerate(row):
+            if isinstance(cell, str) and cell.strip():
+                if index in contact_columns:
+                    masked_row.append(mask_value(cell))
+                else:
+                    masked_row.append(_mask_text(cell, {}))
+            else:
+                masked_row.append(cell)
+        masked_rows.append(masked_row)
+
+    result = dict(preview)
+    result["rows"] = masked_rows
+    return result
+
+
+def mask_cluster(cluster: dict[str, Any]) -> dict[str, Any]:
+    """Mask contact points (and any contact echoed in the label) of a gang cluster."""
+    result = dict(cluster)
+    contact = result.get("contact_point")
+    if isinstance(contact, str) and contact.strip():
+        result["contact_point"] = mask_value(contact)
+    contacts = result.get("contact_points")
+    if isinstance(contacts, list):
+        result["contact_points"] = [
+            mask_value(item) if isinstance(item, str) and item.strip() else item for item in contacts
+        ]
+    label = result.get("label")
+    if isinstance(label, str) and isinstance(contact, str) and contact and contact in label:
+        result["label"] = label.replace(contact, mask_value(contact))
+    return result
+
+
+def mask_clusters(clusters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [mask_cluster(cluster) for cluster in clusters]

@@ -638,6 +638,81 @@ def test_pii_masking_masks_contacts_when_enabled(tmp_path, monkeypatch):
         set_container(original_container)
 
 
+def test_pii_masking_masks_dataset_preview_and_gangs(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDIASPIDER_PII_MASKING", "true")
+    test_container = AppContainer(tmp_path)
+    original_container = current_container
+    set_container(test_container)
+    try:
+        dataset_file_dir = tmp_path / "storage" / "dataset_files"
+        dataset_file_dir.mkdir(parents=True, exist_ok=True)
+        (dataset_file_dir / "pii_preview.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {"content_id": "p1", "wechat": "daili_8888", "body": "电话 13812345678"},
+                        ensure_ascii=False,
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        client = TestClient(app)
+        dataset_id = client.post(
+            "/api/datasets",
+            json={
+                "dataset_name": "PII Preview Dataset",
+                "dataset_type": "raw",
+                "source_platform": "xhs",
+                "scenario_type": "lead_diversion",
+                "storage_uri": "pii_preview.jsonl",
+            },
+        ).json()["dataset"]["id"]
+
+        # Dataset preview: contact column masked, phone masked in free text.
+        preview = client.get(f"/api/datasets/{dataset_id}/preview").json()
+        flat = json.dumps(preview, ensure_ascii=False)
+        assert "daili_8888" not in flat
+        assert "da******88" in flat
+        assert "13812345678" not in flat
+        assert "138****5678" in flat
+
+        # Gang clusters: shared-contact label and contact_point masked.
+        client.post(
+            "/api/signals",
+            json={
+                "dataset_id": dataset_id,
+                "signal_type": "contact_point_hit",
+                "signal_source": "rule:test",
+                "risk_level": "high",
+                "risk_score": 85,
+                "summary": "test",
+                "status": "new",
+                "payload_json": {"contact_point": "daili_8888"},
+            },
+        )
+        client.post(
+            "/api/signals",
+            json={
+                "dataset_id": dataset_id,
+                "signal_type": "contact_point_hit",
+                "signal_source": "rule:test",
+                "risk_level": "critical",
+                "risk_score": 95,
+                "summary": "test",
+                "status": "new",
+                "payload_json": {"contact_point": "daili_8888"},
+            },
+        )
+        gangs = client.get(f"/api/signals/gangs?dataset_id={dataset_id}").json()["clusters"]
+        assert len(gangs) == 1
+        assert gangs[0]["contact_point"] == "da******88"
+        assert "daili_8888" not in json.dumps(gangs, ensure_ascii=False)
+    finally:
+        set_container(original_container)
+
+
 def test_pii_masking_off_by_default_keeps_raw_contact(tmp_path):
     test_container = AppContainer(tmp_path)
     original_container = current_container

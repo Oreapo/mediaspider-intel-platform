@@ -13,6 +13,7 @@ from ..dependencies import (
 from ..schemas.dataset import DatasetCreateRequest
 from ...application.analysis_service import AnalysisService
 from ...application.dataset_service import DatasetService
+from ...application.pii import mask_preview, masking_enabled
 from ...application.signal_service import SignalService
 from ...domain.models.dataset import DatasetType
 from ...domain.models.platform import PlatformKey
@@ -109,9 +110,10 @@ def preview_dataset(
     service: DatasetService = Depends(get_dataset_service),
 ):
     try:
-        return service.preview_dataset(dataset_id, limit=limit)
+        preview = service.preview_dataset(dataset_id, limit=limit)
     except ValueError as exc:
         detail = str(exc)
         if "not found" in detail.lower():
             raise HTTPException(status_code=404, detail=detail) from exc
         raise HTTPException(status_code=400, detail=detail) from exc
+    return mask_preview(preview) if masking_enabled() else preview
