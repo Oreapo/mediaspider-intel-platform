@@ -21,6 +21,10 @@ const theme = ref<Theme>(getInitialTheme())
 function applyTheme(next: Theme) {
   if (typeof document !== 'undefined') {
     document.documentElement.dataset.theme = next
+    const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+    if (favicon) {
+      favicon.href = next === 'pink' ? '/brand/logo-pink.png' : '/brand/logo-blue.png'
+    }
   }
 }
 
