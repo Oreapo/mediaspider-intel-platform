@@ -685,25 +685,6 @@ function statusTone(status: string) {
   min-height: 116px;
 }
 
-.stat-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.stat-icon {
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  color: var(--stat-accent, var(--primary));
-  background: color-mix(in oklch, var(--stat-accent, var(--primary)) 13%, white);
-  border: 1px solid color-mix(in oklch, var(--stat-accent, var(--primary)) 26%, transparent);
-}
-
 .stat-top span:first-child,
 .section-head p,
 .muted,

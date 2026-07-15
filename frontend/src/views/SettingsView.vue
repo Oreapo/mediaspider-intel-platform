@@ -16,6 +16,7 @@ import {
   updateNotificationRule,
 } from '../api/notifications'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import FieldError from '../components/ui/FieldError.vue'
@@ -128,10 +129,10 @@ watch(
 )
 
 const stats = computed(() => [
-  { label: t('settings.stats.rules'), value: rules.value.length },
-  { label: t('settings.stats.enabled'), value: rules.value.filter((item) => item.enabled).length },
-  { label: t('settings.stats.unread'), value: unreadCount.value },
-  { label: t('settings.stats.deliveries'), value: deliveryTotal.value },
+  { label: t('settings.stats.rules'), value: rules.value.length, icon: 'sliders', color: 'var(--primary)' },
+  { label: t('settings.stats.enabled'), value: rules.value.filter((item) => item.enabled).length, icon: 'shield', color: '#17915a' },
+  { label: t('settings.stats.unread'), value: unreadCount.value, icon: 'alert', color: '#cf8214' },
+  { label: t('settings.stats.deliveries'), value: deliveryTotal.value, icon: 'list', color: '#64748b' },
 ])
 
 function channelConfig() {
@@ -435,8 +436,16 @@ async function moveInboxPage(offset: number) {
 <template>
   <section class="page-grid">
     <div class="stats-grid">
-      <article v-for="stat in stats" :key="stat.label" class="surface stat-card">
-        <span>{{ stat.label }}</span>
+      <article
+        v-for="stat in stats"
+        :key="stat.label"
+        class="surface stat-card"
+        :style="{ '--stat-accent': stat.color }"
+      >
+        <div class="stat-top">
+          <span>{{ stat.label }}</span>
+          <span class="stat-icon"><AppIcon :name="stat.icon" :size="18" /></span>
+        </div>
         <strong>{{ stat.value }}</strong>
       </article>
     </div>

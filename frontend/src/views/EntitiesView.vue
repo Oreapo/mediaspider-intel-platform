@@ -10,6 +10,7 @@ import {
   updateEntityStatus,
 } from '../api/entities'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 import PlatformLogo from '../components/ui/PlatformLogo.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
@@ -85,10 +86,10 @@ const mergeErrors = ref<ValidationErrors>({})
 const confirmedSignals = computed(() => signalItems.value.filter((item) => item.status === 'confirmed'))
 
 const entityStats = computed(() => [
-  { label: t('entities.active'), value: entityItems.value.filter((item) => item.status === 'active').length },
-  { label: t('entities.merged'), value: entityItems.value.filter((item) => item.status === 'merged').length },
-  { label: t('entities.highRiskPlus'), value: entityItems.value.filter((item) => item.risk_score >= 80).length },
-  { label: t('entities.relations'), value: relations.value.length },
+  { label: t('entities.active'), value: entityItems.value.filter((item) => item.status === 'active').length, icon: 'users', color: 'var(--primary)' },
+  { label: t('entities.merged'), value: entityItems.value.filter((item) => item.status === 'merged').length, icon: 'layers', color: '#64748b' },
+  { label: t('entities.highRiskPlus'), value: entityItems.value.filter((item) => item.risk_score >= 80).length, icon: 'alert', color: '#dc4536' },
+  { label: t('entities.relations'), value: relations.value.length, icon: 'columns', color: '#7c5cff' },
 ])
 
 const entityTypes = computed(() => Array.from(new Set(entityItems.value.map((item) => item.entity_type))).sort())
@@ -424,8 +425,16 @@ function entityStatusTone(status: string) {
 <template>
   <section class="page-grid">
     <div class="stats-grid">
-      <article v-for="stat in entityStats" :key="stat.label" class="surface stat-card">
-        <span>{{ stat.label }}</span>
+      <article
+        v-for="stat in entityStats"
+        :key="stat.label"
+        class="surface stat-card"
+        :style="{ '--stat-accent': stat.color }"
+      >
+        <div class="stat-top">
+          <span>{{ stat.label }}</span>
+          <span class="stat-icon"><AppIcon :name="stat.icon" :size="18" /></span>
+        </div>
         <strong>{{ stat.value }}</strong>
       </article>
     </div>

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { createAnalysisJob, getAnalysisOutputs } from '../api/analysis'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -45,10 +46,10 @@ const fieldErrors = ref<ValidationErrors>({})
 
 const selectedJob = computed(() => jobItems.value.find((item) => item.id === selectedJobId.value))
 const analysisStats = computed(() => [
-  { label: t('analysis.jobsTitle'), value: jobTotal.value },
-  { label: t('enum.succeeded'), value: jobItems.value.filter((item) => item.status === 'succeeded').length },
-  { label: t('enum.running'), value: jobItems.value.filter((item) => item.status === 'running').length },
-  { label: t('analysis.outputsTitle'), value: outputs.value.length },
+  { label: t('analysis.jobsTitle'), value: jobTotal.value, icon: 'sliders', color: 'var(--primary)' },
+  { label: t('enum.succeeded'), value: jobItems.value.filter((item) => item.status === 'succeeded').length, icon: 'shield', color: '#17915a' },
+  { label: t('enum.running'), value: jobItems.value.filter((item) => item.status === 'running').length, icon: 'activity', color: '#cf8214' },
+  { label: t('analysis.outputsTitle'), value: outputs.value.length, icon: 'file', color: '#64748b' },
 ])
 
 async function fetchJobPage(offset = jobOffset.value) {
@@ -155,8 +156,16 @@ function scopeLabel(value: string) {
 <template>
   <section class="page-grid">
     <div class="stats-grid">
-      <article v-for="stat in analysisStats" :key="stat.label" class="surface stat-card">
-        <span>{{ stat.label }}</span>
+      <article
+        v-for="stat in analysisStats"
+        :key="stat.label"
+        class="surface stat-card"
+        :style="{ '--stat-accent': stat.color }"
+      >
+        <div class="stat-top">
+          <span>{{ stat.label }}</span>
+          <span class="stat-icon"><AppIcon :name="stat.icon" :size="18" /></span>
+        </div>
         <strong>{{ stat.value }}</strong>
       </article>
     </div>

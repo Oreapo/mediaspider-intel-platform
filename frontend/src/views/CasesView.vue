@@ -11,6 +11,7 @@ import {
   updateCase,
 } from '../api/cases'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -90,10 +91,10 @@ const filters = ref({
 })
 
 const caseStats = computed(() => [
-  { label: t('cases.open'), value: caseItems.value.filter((item) => item.status === 'open').length },
-  { label: t('cases.investigating'), value: caseItems.value.filter((item) => item.status === 'investigating').length },
-  { label: t('cases.highPriorityPlus'), value: caseItems.value.filter((item) => ['high', 'critical'].includes(item.priority)).length },
-  { label: t('cases.total'), value: caseItems.value.length },
+  { label: t('cases.open'), value: caseItems.value.filter((item) => item.status === 'open').length, icon: 'briefcase', color: 'var(--primary)' },
+  { label: t('cases.investigating'), value: caseItems.value.filter((item) => item.status === 'investigating').length, icon: 'search', color: '#cf8214' },
+  { label: t('cases.highPriorityPlus'), value: caseItems.value.filter((item) => ['high', 'critical'].includes(item.priority)).length, icon: 'alert', color: '#dc4536' },
+  { label: t('cases.total'), value: caseItems.value.length, icon: 'layers', color: '#64748b' },
 ])
 
 const caseTypes = computed(() => Array.from(new Set(caseItems.value.map((item) => item.case_type))).sort())
@@ -509,8 +510,16 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
 <template>
   <section class="page-grid">
     <div class="stats-grid">
-      <article v-for="stat in caseStats" :key="stat.label" class="surface stat-card">
-        <span>{{ stat.label }}</span>
+      <article
+        v-for="stat in caseStats"
+        :key="stat.label"
+        class="surface stat-card"
+        :style="{ '--stat-accent': stat.color }"
+      >
+        <div class="stat-top">
+          <span>{{ stat.label }}</span>
+          <span class="stat-icon"><AppIcon :name="stat.icon" :size="18" /></span>
+        </div>
         <strong>{{ stat.value }}</strong>
       </article>
     </div>

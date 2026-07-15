@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getSignalDetail, updateSignalStatus } from '../api/signals'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
@@ -61,10 +62,10 @@ const selectedPreviewRow = computed(() => {
 })
 
 const summaryCards = computed(() => [
-  { label: t('signals.riskLevel'), value: signal.value?.risk_level ? labelValue(signal.value.risk_level) : '-' },
-  { label: t('signals.riskScore'), value: signal.value?.risk_score ?? '-' },
-  { label: t('tasks.status'), value: signal.value?.status ? labelValue(signal.value.status) : '-' },
-  { label: t('signalDetail.linkedCases'), value: linkedCases.value.length },
+  { label: t('signals.riskLevel'), value: signal.value?.risk_level ? labelValue(signal.value.risk_level) : '-', icon: 'alert', color: '#dc4536' },
+  { label: t('signals.riskScore'), value: signal.value?.risk_score ?? '-', icon: 'chart', color: 'var(--primary)' },
+  { label: t('tasks.status'), value: signal.value?.status ? labelValue(signal.value.status) : '-', icon: 'activity', color: '#cf8214' },
+  { label: t('signalDetail.linkedCases'), value: linkedCases.value.length, icon: 'briefcase', color: '#17915a' },
 ])
 
 async function loadDetail(reveal = false) {
@@ -163,8 +164,16 @@ onMounted(loadDetail)
       </section>
 
       <div class="stats-grid">
-        <article v-for="item in summaryCards" :key="item.label" class="surface stat-card">
-          <span>{{ item.label }}</span>
+        <article
+          v-for="item in summaryCards"
+          :key="item.label"
+          class="surface stat-card"
+          :style="{ '--stat-accent': item.color }"
+        >
+          <div class="stat-top">
+            <span>{{ item.label }}</span>
+            <span class="stat-icon"><AppIcon :name="item.icon" :size="18" /></span>
+          </div>
           <strong>{{ item.value }}</strong>
         </article>
       </div>

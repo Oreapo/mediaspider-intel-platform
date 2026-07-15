@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { deleteReport, downloadReport, generateReport, updateReport } from '../api/reports'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -54,10 +55,10 @@ const selectedReport = computed<Report | undefined>(() =>
 )
 
 const stats = computed(() => [
-  { label: t('reports.statsReports'), value: reportTotal.value },
-  { label: t('reports.statsGenerated'), value: reportItems.value.filter((item) => item.status === 'generated').length },
-  { label: t('reports.statsCases'), value: new Set(reportItems.value.map((item) => item.case_id)).size },
-  { label: t('reports.statsMarkdown'), value: reportItems.value.filter((item) => item.storage_uri.endsWith('.md')).length },
+  { label: t('reports.statsReports'), value: reportTotal.value, icon: 'file', color: 'var(--primary)' },
+  { label: t('reports.statsGenerated'), value: reportItems.value.filter((item) => item.status === 'generated').length, icon: 'shield', color: '#17915a' },
+  { label: t('reports.statsCases'), value: new Set(reportItems.value.map((item) => item.case_id)).size, icon: 'briefcase', color: '#64748b' },
+  { label: t('reports.statsMarkdown'), value: reportItems.value.filter((item) => item.storage_uri.endsWith('.md')).length, icon: 'list', color: '#cf8214' },
 ])
 
 async function fetchReportPage(offset = reportOffset.value) {
@@ -211,8 +212,16 @@ function reportSignalCount(report: Report) {
 <template>
   <section class="page-grid">
     <div class="stats-grid">
-      <article v-for="stat in stats" :key="stat.label" class="surface stat-card">
-        <span>{{ stat.label }}</span>
+      <article
+        v-for="stat in stats"
+        :key="stat.label"
+        class="surface stat-card"
+        :style="{ '--stat-accent': stat.color }"
+      >
+        <div class="stat-top">
+          <span>{{ stat.label }}</span>
+          <span class="stat-icon"><AppIcon :name="stat.icon" :size="18" /></span>
+        </div>
         <strong>{{ stat.value }}</strong>
       </article>
     </div>

@@ -13,6 +13,7 @@ import {
   startTaskRun,
 } from '../api/tasks'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
@@ -61,10 +62,10 @@ let previewRequestId = 0
 let runPollTimer: number | undefined
 
 const summaryCards = computed(() => [
-  { label: t('taskDetail.runCount'), value: runTotal.value },
-  { label: t('taskDetail.succeededRuns'), value: runStatusCounts.value.succeeded },
-  { label: t('taskDetail.failedRuns'), value: runStatusCounts.value.failed },
-  { label: t('taskDetail.linkedDatasets'), value: datasets.value.length },
+  { label: t('taskDetail.runCount'), value: runTotal.value, icon: 'activity', color: 'var(--primary)' },
+  { label: t('taskDetail.succeededRuns'), value: runStatusCounts.value.succeeded, icon: 'shield', color: '#17915a' },
+  { label: t('taskDetail.failedRuns'), value: runStatusCounts.value.failed, icon: 'alert', color: '#dc4536' },
+  { label: t('taskDetail.linkedDatasets'), value: datasets.value.length, icon: 'layers', color: '#64748b' },
 ])
 
 const runtimeJson = computed(() => JSON.stringify(task.value?.runtime_payload_json || {}, null, 2))
@@ -401,8 +402,16 @@ onUnmounted(clearRunPolling)
       </section>
 
       <div class="stats-grid">
-        <article v-for="item in summaryCards" :key="item.label" class="surface stat-card">
-          <span>{{ item.label }}</span>
+        <article
+          v-for="item in summaryCards"
+          :key="item.label"
+          class="surface stat-card"
+          :style="{ '--stat-accent': item.color }"
+        >
+          <div class="stat-top">
+            <span>{{ item.label }}</span>
+            <span class="stat-icon"><AppIcon :name="item.icon" :size="18" /></span>
+          </div>
           <strong>{{ item.value }}</strong>
         </article>
       </div>

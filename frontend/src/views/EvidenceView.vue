@@ -7,6 +7,7 @@ import {
   getEvidencePacket,
 } from '../api/evidence'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -47,10 +48,10 @@ const error = ref('')
 const formErrors = ref<ValidationErrors>({})
 
 const packetStats = computed(() => [
-  { label: t('evidence.statsPackets'), value: packetTotal.value },
-  { label: t('evidence.statsCases'), value: new Set(packetItems.value.map((item) => item.case_id)).size },
-  { label: t('evidence.statsWithArtifact'), value: packetItems.value.filter((item) => item.storage_uri).length },
-  { label: t('evidence.statsLatest'), value: packetItems.value[0]?.packet_name || '-' },
+  { label: t('evidence.statsPackets'), value: packetTotal.value, icon: 'package', color: 'var(--primary)' },
+  { label: t('evidence.statsCases'), value: new Set(packetItems.value.map((item) => item.case_id)).size, icon: 'briefcase', color: '#64748b' },
+  { label: t('evidence.statsWithArtifact'), value: packetItems.value.filter((item) => item.storage_uri).length, icon: 'shield', color: '#17915a' },
+  { label: t('evidence.statsLatest'), value: packetItems.value[0]?.packet_name || '-', icon: 'file', color: '#cf8214' },
 ])
 
 function manifestSummary(packet: EvidencePacket | null) {
@@ -164,8 +165,16 @@ async function removePacket(packetId: string) {
 <template>
   <section class="page-grid">
     <div class="stats-grid">
-      <article v-for="stat in packetStats" :key="stat.label" class="surface stat-card">
-        <span>{{ stat.label }}</span>
+      <article
+        v-for="stat in packetStats"
+        :key="stat.label"
+        class="surface stat-card"
+        :style="{ '--stat-accent': stat.color }"
+      >
+        <div class="stat-top">
+          <span>{{ stat.label }}</span>
+          <span class="stat-icon"><AppIcon :name="stat.icon" :size="18" /></span>
+        </div>
         <strong>{{ stat.value }}</strong>
       </article>
     </div>

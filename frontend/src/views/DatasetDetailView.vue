@@ -5,6 +5,7 @@ import { getAnalysisOutputsBatch, listAnalysisJobs } from '../api/analysis'
 import { getDataset, previewDataset } from '../api/datasets'
 import { getTask, getTaskRun } from '../api/tasks'
 import AppAlert from '../components/ui/AppAlert.vue'
+import AppIcon from '../components/ui/AppIcon.vue'
 import BaseSection from '../components/ui/BaseSection.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingState from '../components/ui/LoadingState.vue'
@@ -30,10 +31,10 @@ const error = ref('')
 let detailRequestId = 0
 
 const summaryCards = computed(() => [
-  { label: t('datasetDetail.records'), value: dataset.value?.record_count || 0 },
-  { label: t('datasetDetail.analysisJobs'), value: analysisJobs.value.length },
-  { label: t('datasetDetail.outputs'), value: Object.values(analysisOutputs.value).flat().length },
-  { label: t('datasetDetail.sourceRuns'), value: dataset.value?.source_run_id ? 1 : 0 },
+  { label: t('datasetDetail.records'), value: dataset.value?.record_count || 0, icon: 'layers', color: 'var(--primary)' },
+  { label: t('datasetDetail.analysisJobs'), value: analysisJobs.value.length, icon: 'sliders', color: '#cf8214' },
+  { label: t('datasetDetail.outputs'), value: Object.values(analysisOutputs.value).flat().length, icon: 'file', color: '#64748b' },
+  { label: t('datasetDetail.sourceRuns'), value: dataset.value?.source_run_id ? 1 : 0, icon: 'activity', color: '#17915a' },
 ])
 
 async function loadDetail() {
@@ -179,8 +180,16 @@ watch(
       </section>
 
       <div class="stats-grid">
-        <article v-for="item in summaryCards" :key="item.label" class="surface stat-card">
-          <span>{{ item.label }}</span>
+        <article
+          v-for="item in summaryCards"
+          :key="item.label"
+          class="surface stat-card"
+          :style="{ '--stat-accent': item.color }"
+        >
+          <div class="stat-top">
+            <span>{{ item.label }}</span>
+            <span class="stat-icon"><AppIcon :name="item.icon" :size="18" /></span>
+          </div>
           <strong>{{ item.value }}</strong>
         </article>
       </div>
