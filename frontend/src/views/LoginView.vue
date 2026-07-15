@@ -56,12 +56,11 @@ async function submitLogin() {
   <main class="login-page">
     <section class="login-panel surface">
       <div class="login-brand">
-        <span class="brand-mark">
-          <img
-            :src="theme === 'pink' ? '/brand/logo-pink.png' : '/brand/logo-blue.png'"
-            alt="Digital Forensics"
-          />
-        </span>
+        <img
+          class="login-logo"
+          :src="theme === 'pink' ? '/brand/logo-cloud-pink.png' : '/brand/logo-cloud-blue.png'"
+          alt="Digital Forensics"
+        />
         <div>
           <strong>{{ t('app.name') }}</strong>
           <p>{{ t('app.subtitle') }}</p>
@@ -125,28 +124,16 @@ async function submitLogin() {
 }
 
 .login-brand {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.brand-mark {
-  width: 46px;
-  height: 46px;
   display: grid;
-  place-items: center;
-  overflow: hidden;
-  padding: 3px;
-  border-radius: var(--radius);
-  background: #fff;
-  border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
-  box-shadow: 0 12px 28px color-mix(in oklch, var(--primary) 24%, transparent);
+  justify-items: center;
+  text-align: center;
+  gap: 8px;
 }
 
-.brand-mark img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.login-logo {
+  width: 118px;
+  height: auto;
+  filter: drop-shadow(0 12px 22px color-mix(in oklch, var(--primary) 22%, transparent));
 }
 
 .login-brand strong {
