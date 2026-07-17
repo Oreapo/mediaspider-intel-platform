@@ -134,18 +134,14 @@ function changeLocale(nextLocale: string | number) {
 }
 
 .brand-mark {
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
-  overflow: hidden;
-  border-radius: 12px;
-  padding: 3px;
-  background: #fff;
-  border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.6) inset,
-    0 12px 24px -10px var(--brand-glow);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  filter: drop-shadow(0 6px 12px color-mix(in oklch, var(--primary) 28%, transparent));
 }
 
 .brand-mark img {
