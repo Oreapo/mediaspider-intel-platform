@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import AppIcon from './AppIcon.vue'
 import { useI18n } from '../../composables/useI18n'
+import { useTheme } from '../../composables/useTheme'
 
+// `icon` is kept for call-site compatibility; the emblem is now the brand mascot.
 withDefaults(
   defineProps<{
     title?: string
@@ -14,13 +15,17 @@ withDefaults(
 )
 
 const { t } = useI18n()
+const { theme } = useTheme()
 </script>
 
 <template>
   <div class="empty-state">
-    <div class="empty-mark" aria-hidden="true">
-      <AppIcon :name="icon" :size="22" />
-    </div>
+    <img
+      class="empty-mascot"
+      :src="theme === 'pink' ? '/brand/mascot-pink.png' : '/brand/mascot-blue.png'"
+      alt=""
+      aria-hidden="true"
+    />
     <div class="empty-copy">
       <strong>{{ title || t('common.noData') }}</strong>
       <p v-if="description">{{ description }}</p>
@@ -48,19 +53,11 @@ const { t } = useI18n()
   color: var(--muted-foreground);
 }
 
-.empty-mark {
+.empty-mascot {
   flex-shrink: 0;
-  width: 46px;
-  height: 46px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  color: var(--primary);
-  border: 1px solid color-mix(in oklch, var(--primary) 22%, transparent);
-  background: color-mix(in oklch, var(--primary) 9%, white);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    0 8px 18px -12px var(--brand-glow);
+  width: 84px;
+  height: auto;
+  filter: drop-shadow(0 8px 16px color-mix(in oklch, var(--primary) 18%, transparent));
 }
 
 .empty-copy {
