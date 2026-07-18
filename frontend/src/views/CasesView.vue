@@ -472,6 +472,16 @@ function priorityTone(priority: string) {
   return 'neutral'
 }
 
+function priorityColor(priority: string) {
+  const map: Record<string, string> = {
+    critical: '#dc2626',
+    high: '#ea6a1f',
+    medium: '#cf8214',
+    low: '#17915a',
+  }
+  return map[priority] || '#94a3b8'
+}
+
 function caseStatusTone(status: string) {
   if (status === 'closed') return 'neutral'
   if (status === 'ready_for_evidence') return 'warning'
@@ -685,7 +695,12 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
         <LoadingState v-if="casesLoading" :title="t('cases.loading')" />
         <AppAlert v-else-if="casesError" tone="error" :title="t('common.loadFailed')" :message="casesError" />
         <div v-else class="case-list">
-          <article v-for="item in caseItems" :key="item.id" class="case-item">
+          <article
+            v-for="item in caseItems"
+            :key="item.id"
+            class="case-item"
+            :style="{ '--row-accent': priorityColor(item.priority) }"
+          >
             <div class="case-main">
               <div>
                 <strong>{{ item.case_name }}</strong>
@@ -1256,7 +1271,6 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
   resize: vertical;
 }
 
-.case-item,
 .compact-item,
 .detail-card,
 .timeline-item,
@@ -1265,6 +1279,35 @@ watch(analysisJobItems, loadAnalysisOutputs, { immediate: true })
   border-radius: 16px;
   border: 1px solid rgba(226, 232, 240, 0.9);
   background: rgba(248, 250, 252, 0.82);
+}
+
+.case-item {
+  position: relative;
+  overflow: hidden;
+  padding: 16px 16px 16px 22px;
+  border-radius: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--row-accent, #94a3b8) 7%, transparent), transparent 32%),
+    rgba(252, 253, 254, 0.9);
+  transition:
+    transform 160ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+.case-item::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--row-accent, #94a3b8);
+}
+
+.case-item:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklch, var(--row-accent, var(--primary)) 40%, var(--border));
+  box-shadow: 0 16px 32px -20px color-mix(in oklch, var(--row-accent, #1e40e6) 55%, transparent);
 }
 
 .case-main,

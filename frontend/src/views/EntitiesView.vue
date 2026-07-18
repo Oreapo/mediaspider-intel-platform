@@ -420,6 +420,13 @@ function entityStatusTone(status: string) {
   if (status === 'dismissed') return 'danger'
   return 'neutral'
 }
+
+function riskScoreColor(score: number) {
+  if (score >= 80) return '#dc2626'
+  if (score >= 60) return '#ea6a1f'
+  if (score >= 40) return '#cf8214'
+  return '#17915a'
+}
 </script>
 
 <template>
@@ -700,7 +707,12 @@ function entityStatusTone(status: string) {
         <LoadingState v-if="entitiesLoading" :title="t('entities.loading')" />
         <AppAlert v-else-if="entitiesError" tone="error" :title="t('common.loadFailed')" :message="entitiesError" />
         <div v-else class="entity-list">
-          <article v-for="item in entityItems" :key="item.id" class="entity-item">
+          <article
+            v-for="item in entityItems"
+            :key="item.id"
+            class="entity-item"
+            :style="{ '--row-accent': riskScoreColor(item.risk_score) }"
+          >
             <div class="entity-main">
               <div>
                 <strong>{{ item.display_name }}</strong>
@@ -967,13 +979,41 @@ function entityStatusTone(status: string) {
   gap: 6px;
 }
 
-.entity-item,
 .detail-card,
 .compact-item {
   padding: 16px;
   border-radius: 16px;
   border: 1px solid rgba(226, 232, 240, 0.9);
   background: rgba(248, 250, 252, 0.82);
+}
+
+.entity-item {
+  position: relative;
+  overflow: hidden;
+  padding: 16px 16px 16px 22px;
+  border-radius: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--row-accent, #94a3b8) 7%, transparent), transparent 32%),
+    rgba(252, 253, 254, 0.9);
+  transition:
+    transform 160ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+.entity-item::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--row-accent, #94a3b8);
+}
+
+.entity-item:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklch, var(--row-accent, var(--primary)) 40%, var(--border));
+  box-shadow: 0 16px 32px -20px color-mix(in oklch, var(--row-accent, #1e40e6) 55%, transparent);
 }
 
 .entity-main {
