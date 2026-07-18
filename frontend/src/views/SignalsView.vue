@@ -285,6 +285,16 @@ function riskTone(level: string) {
   return 'neutral'
 }
 
+function riskColor(level: string) {
+  const map: Record<string, string> = {
+    critical: '#dc2626',
+    high: '#ea6a1f',
+    medium: '#cf8214',
+    low: '#17915a',
+  }
+  return map[level] || '#94a3b8'
+}
+
 function statusTone(status: string) {
   if (status === 'confirmed') return 'success'
   if (status === 'reviewing') return 'info'
@@ -542,7 +552,12 @@ function statusTone(status: string) {
         <LoadingState v-if="signalsLoading" :title="t('signals.loading')" />
         <AppAlert v-else-if="signalsError" tone="error" :title="t('common.loadFailed')" :message="signalsError" />
         <div v-else class="signal-list">
-          <article v-for="item in signalItems" :key="item.id" class="signal-item">
+          <article
+            v-for="item in signalItems"
+            :key="item.id"
+            class="signal-item"
+            :style="{ '--row-accent': riskColor(item.risk_level) }"
+          >
             <div class="signal-main">
               <div>
                 <strong>{{ item.summary }}</strong>
@@ -756,12 +771,41 @@ function statusTone(status: string) {
   resize: vertical;
 }
 
-.signal-item,
 .trace-card {
   padding: 16px;
   border-radius: 16px;
   border: 1px solid rgba(226, 232, 240, 0.9);
   background: rgba(248, 250, 252, 0.82);
+}
+
+.signal-item {
+  position: relative;
+  overflow: hidden;
+  padding: 16px 16px 16px 22px;
+  border-radius: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--row-accent, #94a3b8) 7%, transparent), transparent 32%),
+    rgba(252, 253, 254, 0.9);
+  transition:
+    transform 160ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+/* Left risk rail — scan severity at a glance. */
+.signal-item::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--row-accent, #94a3b8);
+}
+
+.signal-item:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklch, var(--row-accent, var(--primary)) 40%, var(--border));
+  box-shadow: 0 16px 32px -20px color-mix(in oklch, var(--row-accent, #1e40e6) 55%, transparent);
 }
 
 .signal-main {
@@ -773,6 +817,7 @@ function statusTone(status: string) {
 .signal-main strong {
   display: block;
   margin-bottom: 4px;
+  letter-spacing: -0.01em;
 }
 
 .signal-main p {
