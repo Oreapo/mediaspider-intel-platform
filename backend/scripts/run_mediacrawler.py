@@ -12,6 +12,16 @@ async def _do_not_skip_failed_api_login_check(self) -> bool:
     return False
 
 
+# Platforms whose create_*_client reads navigator.userAgent off the live page.
+# The homepage can still be navigating right after goto() (SPA redirects), which
+# destroys the JS execution context and crashes the run with exit 1 — most
+# visible in CDP mode. Map each to (module, crawler class, create-method).
+_NAV_SENSITIVE_CLIENTS = {
+    "dy": ("media_platform.douyin.core", "DouYinCrawler", "create_douyin_client"),
+    "tieba": ("media_platform.tieba.core", "TieBaCrawler", "create_tieba_client"),
+}
+
+
 def _platform_arg() -> str:
     try:
         return sys.argv[sys.argv.index("--platform") + 1]
@@ -19,22 +29,18 @@ def _platform_arg() -> str:
         return ""
 
 
-def _patch_douyin_navigation_safety() -> None:
-    """Make Douyin client creation resilient to the homepage's post-goto navigation.
+def _patch_navigation_safety(platform: str) -> None:
+    """Wait for the page to settle and retry client creation so the
+    ``navigator.userAgent`` read doesn't race a homepage navigation."""
+    target = _NAV_SENSITIVE_CLIENTS.get(platform)
+    if target is None:
+        return
+    module_name, class_name, method_name = target
+    module = importlib.import_module(module_name)
+    crawler_cls = getattr(module, class_name)
+    original_create = getattr(crawler_cls, method_name)
 
-    Douyin's home page keeps navigating (SPA redirects) after ``goto`` returns,
-    and ``create_douyin_client`` immediately does
-    ``context_page.evaluate("() => navigator.userAgent")``. When the evaluate
-    races the navigation, Playwright raises "Execution context was destroyed,
-    most likely because of a navigation" and the run exits with code 1 — most
-    visible in CDP mode. Wait for the page to settle and retry the (idempotent)
-    client creation so the User-Agent read lands on a live context.
-    """
-    core = importlib.import_module("media_platform.douyin.core")
-    crawler_cls = core.DouYinCrawler
-    original_create = crawler_cls.create_douyin_client
-
-    async def safe_create_douyin_client(self, httpx_proxy):
+    async def safe_create_client(self, *args, **kwargs):
         try:
             await self.context_page.wait_for_load_state("domcontentloaded", timeout=8000)
         except Exception:
@@ -42,8 +48,8 @@ def _patch_douyin_navigation_safety() -> None:
         last_error: Exception | None = None
         for attempt in range(4):
             try:
-                return await original_create(self, httpx_proxy)
-            except Exception as exc:  # noqa: BLE001 - narrow by message below
+                return await original_create(self, *args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - narrowed by message below
                 last_error = exc
                 message = str(exc).lower()
                 if attempt < 3 and ("execution context was destroyed" in message or "navigation" in message):
@@ -53,7 +59,7 @@ def _patch_douyin_navigation_safety() -> None:
         assert last_error is not None
         raise last_error
 
-    crawler_cls.create_douyin_client = safe_create_douyin_client
+    setattr(crawler_cls, method_name, safe_create_client)
 
 
 def main() -> int:
@@ -67,8 +73,7 @@ def main() -> int:
         _do_not_skip_failed_api_login_check
     )
 
-    if _platform_arg() == "dy":
-        _patch_douyin_navigation_safety()
+    _patch_navigation_safety(_platform_arg())
 
     return int(crawler_main.run_cli())
 
