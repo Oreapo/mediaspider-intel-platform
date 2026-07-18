@@ -123,6 +123,13 @@ function statusTone(status: string) {
   return 'neutral'
 }
 
+function runTone(status: string) {
+  if (status === 'succeeded') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'running') return 'info'
+  return 'neutral'
+}
+
 onMounted(loadDetail)
 </script>
 
@@ -185,14 +192,14 @@ onMounted(loadDetail)
         <BaseSection :title="t('signals.traceTitle')" :description="t('signalDetail.traceDescription')">
           <div class="trace-grid">
             <div class="trace-card">
-              <span>{{ t('signals.dataset') }}</span>
+              <span class="trace-label"><AppIcon name="layers" :size="15" />{{ t('signals.dataset') }}</span>
               <strong>{{ dataset?.dataset_name || signal.dataset_id }}</strong>
               <RouterLink class="secondary-button link-button" :to="{ name: 'dataset-detail', params: { datasetId: signal.dataset_id } }">
                 {{ t('signalDetail.openDataset') }}
               </RouterLink>
             </div>
             <div class="trace-card">
-              <span>{{ t('datasetDetail.sourceTask') }}</span>
+              <span class="trace-label"><AppIcon name="list" :size="15" />{{ t('datasetDetail.sourceTask') }}</span>
               <strong>{{ sourceTask?.task_name || dataset?.source_task_id || '-' }}</strong>
               <RouterLink
                 v-if="dataset?.source_task_id"
@@ -203,12 +210,12 @@ onMounted(loadDetail)
               </RouterLink>
             </div>
             <div class="trace-card">
-              <span>{{ t('datasetDetail.sourceRun') }}</span>
+              <span class="trace-label"><AppIcon name="activity" :size="15" />{{ t('datasetDetail.sourceRun') }}</span>
               <strong>{{ sourceRun?.id || signal.task_run_id || dataset?.source_run_id || '-' }}</strong>
-              <p v-if="sourceRun">{{ t('tasks.status') }}: {{ labelValue(sourceRun.status) }}</p>
+              <StatusBadge v-if="sourceRun" :label="labelValue(sourceRun.status)" :tone="runTone(sourceRun.status)" />
             </div>
             <div class="trace-card">
-              <span>{{ t('signalDetail.sourceRow') }}</span>
+              <span class="trace-label"><AppIcon name="columns" :size="15" />{{ t('signalDetail.sourceRow') }}</span>
               <strong>{{ rowIndex ?? '-' }}</strong>
               <p>{{ sourceRef.raw_ref || sourceRef.source_entity_id || '-' }}</p>
             </div>
@@ -367,6 +374,32 @@ onMounted(loadDetail)
   border-radius: 16px;
   border: 1px solid rgba(226, 232, 240, 0.9);
   background: rgba(248, 250, 252, 0.82);
+}
+
+.trace-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.trace-label svg {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.trace-card {
+  transition:
+    transform 160ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+.trace-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklch, var(--primary) 26%, var(--border));
+  box-shadow: 0 14px 28px -20px var(--brand-glow);
 }
 
 .trace-card strong,
