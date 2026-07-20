@@ -85,6 +85,13 @@ def _patch_tieba_search(platform: str) -> None:
       detail parser targets retired markup and raises "list index out of range".
       Read the current OP container ourselves and merge the body into the
       search-level note so every record carries metadata *and* full text.
+    * Comments reported 0 without ever loading a page: the bundled pager is
+      gated on ``total_replay_page``, which nothing populates, and its parser
+      targets the classic ``lzl_single_post`` markup. Parse today's
+      ``pb-comment-item`` cards off the already-loaded detail HTML instead.
+
+    Sub-comments (楼中楼) are not collected; the platform leaves them off by
+    default.
     """
     if platform != "tieba":
         return
@@ -162,6 +169,9 @@ def _patch_tieba_search(platform: str) -> None:
     from parsel import Selector
 
     search_cache: dict[str, object] = {}
+    # Detail HTML kept per note so the comment pass can reuse the page the body
+    # pass already loaded instead of fetching each post a second time.
+    detail_cache: dict[str, str] = {}
     original_get_notes = client_module.BaiduTieBaClient.get_notes_by_keyword
 
     async def get_notes_by_keyword(self, *args, **kwargs):
@@ -183,7 +193,9 @@ def _patch_tieba_search(platform: str) -> None:
                 )
             except Exception:
                 pass
-            detail = Selector(text=await self.playwright_page.content())
+            page_html = await self.playwright_page.content()
+            detail_cache[note_id] = page_html
+            detail = Selector(text=page_html)
             body = _collapse_cjk_spaces(
                 " ".join(
                     part.strip()
@@ -220,6 +232,88 @@ def _patch_tieba_search(platform: str) -> None:
             raise
 
     client_module.BaiduTieBaClient.get_note_by_id = get_note_by_id
+
+    # Comments render into `div.pb-comment-item` on the same post page, while
+    # the bundled parser still targets the classic `lzl_single_post` markup and
+    # its pager is gated on `total_replay_page`, which nothing populates — so
+    # the crawler reported 0 comments without ever loading a page. Parse the
+    # current markup off the cached detail HTML; sponsored blocks sit outside
+    # `pb-comment-item`, so they are excluded for free.
+    tieba_comment_cls = importlib.import_module("model.m_baidu_tieba").TiebaComment
+
+    async def get_note_all_comments(
+        self, note_detail, crawl_interval: float = 1.0, callback=None, max_count: int = 10
+    ):
+        note_url = f"{self._host}/p/{note_detail.note_id}"
+        comments: list = []
+        try:
+            page_html = detail_cache.get(note_detail.note_id)
+            if page_html is None:
+                await self.playwright_page.goto(note_url, wait_until="domcontentloaded")
+                try:
+                    await self.playwright_page.wait_for_selector(
+                        ".pb-comment-item", timeout=15000
+                    )
+                except Exception:
+                    pass
+                page_html = await self.playwright_page.content()
+
+            def first(node, class_name: str, collapse: bool = True) -> str:
+                found = node.xpath(f"(.//*[contains(@class,'{class_name}')])[1]")
+                if not found:
+                    return ""
+                text = " ".join(
+                    part.strip()
+                    for part in found.xpath(".//text()").getall()
+                    if part.strip()
+                )
+                # Collapsing is for highlight noise inside prose; the meta line
+                # separates time from IP location with a space that must stay.
+                return _collapse_cjk_spaces(text) if collapse else text
+
+            for item in Selector(text=page_html).xpath(
+                "//div[contains(@class,'pb-comment-item')]"
+            ):
+                if len(comments) >= max_count:
+                    break
+                content = first(item, "pb-rich-text")
+                if not content:
+                    continue
+                # "第2楼 21小时前 浙江" -> floor, publish time, ip location
+                publish_time, ip_location = "", ""
+                desc = re.sub(
+                    r"^第\d+楼\s*", "", first(item, "comment-desc-left", collapse=False)
+                )
+                parts = desc.split()
+                if len(parts) >= 2:
+                    publish_time, ip_location = " ".join(parts[:-1]), parts[-1]
+                elif parts:
+                    publish_time = parts[0]
+                comments.append(
+                    tieba_comment_cls(
+                        comment_id=item.attrib.get("data-id", "")
+                        or f"{note_detail.note_id}_{len(comments)}",
+                        content=content,
+                        user_nickname=first(item, "head-name"),
+                        publish_time=publish_time,
+                        ip_location=ip_location,
+                        note_id=note_detail.note_id,
+                        note_url=note_url,
+                        tieba_id="",
+                        tieba_name=note_detail.tieba_name,
+                        tieba_link="",
+                    )
+                )
+            if callback and comments:
+                await callback(note_detail.note_id, comments)
+        except Exception as exc:  # noqa: BLE001 - comments are best-effort
+            print(
+                f"[tieba] comment fetch failed for {note_detail.note_id}: {exc}",
+                file=sys.stderr,
+            )
+        return comments
+
+    client_module.BaiduTieBaClient.get_note_all_comments = get_note_all_comments
 
 
 def main() -> int:
