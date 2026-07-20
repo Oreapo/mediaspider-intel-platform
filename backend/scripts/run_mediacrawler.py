@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import re
 import sys
 from pathlib import Path
+
+
+def _collapse_cjk_spaces(text: str) -> str:
+    """Keyword <em> highlights split text nodes and leave stray spaces around
+    the term; drop whitespace that sits between two adjacent CJK characters."""
+    return re.sub(r"(?<=[一-鿿])\s+(?=[一-鿿])", "", text)
 
 
 async def _do_not_skip_failed_api_login_check(self) -> bool:
@@ -62,6 +69,159 @@ def _patch_navigation_safety(platform: str) -> None:
     setattr(crawler_cls, method_name, safe_create_client)
 
 
+def _patch_tieba_search(platform: str) -> None:
+    """Make anonymous tieba keyword search work again.
+
+    Tieba's qrcode login DOM is broken upstream and its search/post pages are
+    public, so collection runs on a guest session. Three things changed on
+    Baidu's side that this repairs:
+
+    * Login is forced whenever the cookie ``pong`` check fails — pin it to
+      ``True`` so the guest session proceeds instead of hanging on login.
+    * Search results now render into ``div.threadcardclass`` cards via JS; the
+      bundled parser still looks for the retired ``div.s_post`` markup (0 posts).
+      Give the SPA time to settle and parse the current card structure.
+    * The full post body lives on each ``/p/<id>`` detail page, but the bundled
+      detail parser targets retired markup and raises "list index out of range".
+      Read the current OP container ourselves and merge the body into the
+      search-level note so every record carries metadata *and* full text.
+    """
+    if platform != "tieba":
+        return
+
+    # Guest session: report "logged in" so the broken login flow never runs.
+    client_module = importlib.import_module("media_platform.tieba.client")
+
+    async def _always_logged_in(self, *args, **kwargs) -> bool:
+        return True
+
+    client_module.BaiduTieBaClient.pong = _always_logged_in
+
+    config = importlib.import_module("config")
+    try:
+        if int(getattr(config, "CRAWLER_MAX_SLEEP_SEC", 0)) < 12:
+            config.CRAWLER_MAX_SLEEP_SEC = 12
+    except Exception:
+        pass
+
+    help_module = importlib.import_module("media_platform.tieba.help")
+    tieba_note_cls = importlib.import_module("model.m_baidu_tieba").TiebaNote
+
+    def extract_search_note_list(page_content: str):
+        from parsel import Selector
+
+        selector = Selector(text=page_content)
+        notes = []
+        for card in selector.xpath("//div[contains(@class,'threadcardclass')]"):
+            href = card.xpath(".//a/@href").get(default="")
+            match = re.search(r"/p/(\d+)", href)
+            if not match:
+                continue
+            note_id = match.group(1)
+
+            def joined(xpath: str) -> str:
+                text = " ".join(
+                    part.strip() for part in card.xpath(xpath).getall() if part.strip()
+                )
+                return _collapse_cjk_spaces(text)
+
+            # "<author> 发布于 <date>"
+            top_title = joined(".//*[contains(@class,'top-title')]//text()")
+            author, publish_time = "", ""
+            head = re.match(r"^(.*?)\s*发布于\s*(.+)$", top_title)
+            if head:
+                author, publish_time = head.group(1).strip(), head.group(2).strip()
+
+            title = joined(".//*[contains(@class,'title-content-wrap')]//text()")
+            desc = joined(".//*[contains(@class,'thread-content-box')]//text()") or title
+            forum = joined(".//*[contains(@class,'forum-name-text')]//text()")
+
+            notes.append(
+                tieba_note_cls(
+                    note_id=note_id,
+                    title=title or forum,
+                    desc=desc,
+                    note_url=f"https://tieba.baidu.com/p/{note_id}",
+                    user_nickname=author,
+                    user_link="",
+                    tieba_name=forum,
+                    tieba_link="",
+                    publish_time=publish_time,
+                )
+            )
+        return notes
+
+    help_module.TieBaExtractor.extract_search_note_list = staticmethod(extract_search_note_list)
+
+    # Search cards carry the metadata (title/forum/author/time) but only a
+    # content preview; the full post body lives on the /p/<id> detail page,
+    # whose bundled parser targets retired markup and raises "list index out of
+    # range". Cache the search notes, then enrich each with the detail-page body
+    # read from the current OP container (the single ``pb-content-wrap``),
+    # falling back to the search-level note if the detail fetch fails.
+    from parsel import Selector
+
+    search_cache: dict[str, object] = {}
+    original_get_notes = client_module.BaiduTieBaClient.get_notes_by_keyword
+
+    async def get_notes_by_keyword(self, *args, **kwargs):
+        notes = await original_get_notes(self, *args, **kwargs)
+        for note in notes or []:
+            search_cache[note.note_id] = note
+        return notes
+
+    client_module.BaiduTieBaClient.get_notes_by_keyword = get_notes_by_keyword
+
+    async def get_note_by_id(self, note_id):
+        note = search_cache.get(note_id)
+        note_url = f"{self._host}/p/{note_id}"
+        try:
+            await self.playwright_page.goto(note_url, wait_until="domcontentloaded")
+            try:
+                await self.playwright_page.wait_for_selector(
+                    ".pb-content-wrap, .pb-text-wrapper", timeout=15000
+                )
+            except Exception:
+                pass
+            detail = Selector(text=await self.playwright_page.content())
+            body = _collapse_cjk_spaces(
+                " ".join(
+                    part.strip()
+                    for part in detail.xpath(
+                        "//*[contains(@class,'pb-content-wrap')]//text()"
+                    ).getall()
+                    if part.strip()
+                )
+            )
+            raw_title = detail.xpath("//title/text()").get(default="").strip()
+            title = re.sub(r"-百度贴吧\s*$", "", raw_title).strip()
+            if note is None:
+                note = tieba_note_cls(
+                    note_id=note_id,
+                    title=title,
+                    desc=body,
+                    note_url=note_url,
+                    user_link="",
+                    user_nickname="",
+                    tieba_name="",
+                    tieba_link="",
+                    publish_time="",
+                )
+            else:
+                if title:
+                    note.title = title
+                if body:
+                    note.desc = body
+            return note
+        except Exception as exc:  # noqa: BLE001 - fall back to search-level data
+            print(f"[tieba] detail fetch failed for {note_id}: {exc}", file=sys.stderr)
+            if note is not None:
+                return note
+            raise
+
+    client_module.BaiduTieBaClient.get_note_by_id = get_note_by_id
+
+
 def main() -> int:
     crawler_root = Path.cwd()
     if str(crawler_root) not in sys.path:
@@ -73,7 +233,9 @@ def main() -> int:
         _do_not_skip_failed_api_login_check
     )
 
-    _patch_navigation_safety(_platform_arg())
+    platform = _platform_arg()
+    _patch_navigation_safety(platform)
+    _patch_tieba_search(platform)
 
     return int(crawler_main.run_cli())
 
